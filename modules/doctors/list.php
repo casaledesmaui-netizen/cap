@@ -1,0 +1,506 @@
+<?php
+// Doctors management — profile cards, add/edit drawer, toggle active status.
+
+require_once '../../includes/config.php';
+require_once '../../includes/db.php';
+require_once '../../includes/auth.php';
+
+require_admin(); // Admin only
+
+$page_title = 'Doctors';
+
+// Handle POST actions
+$error   = '';
+$success = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+
+    // ── ADD / EDIT DOCTOR ─────────────────────────────────────────
+    if ($action === 'save') {
+        $id             = intval($_POST['doctor_id'] ?? 0);
+        $full_name      = trim($_POST['full_name'] ?? '');
+        $license_number = trim($_POST['license_number'] ?? '');
+        $specialization = trim($_POST['specialization'] ?? '');
+        $bio            = trim($_POST['bio'] ?? '');
+        $schedule_days  = trim($_POST['schedule_days'] ?? '');
+        $start_time     = trim($_POST['start_time'] ?? '08:00');
+        $end_time       = trim($_POST['end_time'] ?? '17:00');
+        $is_active      = isset($_POST['is_active']) ? 1 : 0;
+        $photo_url      = '';
+
+        if (empty($full_name)) {
+            $error = 'Doctor name is required.';
+        } else {
+            // Handle photo upload
+            if (!empty($_FILES['photo']['name'])) {
+                $allowed_types = ['image/jpeg', 'image/png', 'image/webp'];
+                $ftype = mime_content_type($_FILES['photo']['tmp_name']);
+                if (!in_array($ftype, $allowed_types)) {
+                    $error = 'Photo must be JPG, PNG, or WebP.';    
+                } elseif ($_FILES['photo']['size'] > 2 * 1024 * 1024) {
+                    $error = 'Photo must be under 2MB.';
+                } else {
+                    $ext      = pathinfo($_FILES['photo']['name'], PATHINFO_EXTENSION);
+                    $fname    = 'dr_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . strtolower($ext);
+                    $dest_dir = __DIR__ . '/../../assets/doctors/';
+                    if (!is_dir($dest_dir)) mkdir($dest_dir, 0755, true);
+                    if (move_uploaded_file($_FILES['photo']['tmp_name'], $dest_dir . $fname)) {
+                        $photo_url = 'assets/doctors/' . $fname;
+                    }
+                }
+            }
+
+            if (!$error) {
+                if ($id > 0) { 
+                    // Update existing
+                    if ($photo_url) {
+                        $stmt = $conn->prepare("UPDATE doctors SET full_name=?,license_number=?,specialization=?,bio=?,photo_url=?,schedule_days=?,start_time=?,end_time=?,is_active=?,updated_at=NOW() WHERE id=?");
+                        $stmt->bind_param('ssssssssii', $full_name,$license_number,$specialization,$bio,$photo_url,$schedule_days,$start_time,$end_time,$is_active,$id);
+                    } else {
+                        $stmt = $conn->prepare("UPDATE doctors SET full_name=?,license_number=?,specialization=?,bio=?,schedule_days=?,start_time=?,end_time=?,is_active=?,updated_at=NOW() WHERE id=?");
+                        $stmt->bind_param('sssssssii', $full_name,$license_number,$specialization,$bio,$schedule_days,$start_time,$end_time,$is_active,$id);
+                    }
+                    $stmt->execute();
+                    $stmt->close();
+                    log_action($conn,$current_user_id,$current_user_name,'Updated Doctor','doctors',$id,"Updated: $full_name");
+                    $success = "Doctor updated successfully.";
+                } else {
+                   // Insert new
+                    // Grab the branch_id from the session (default to 1 if you haven't logged out/in yet)
+                    $branch_id = $_SESSION['branch_id'] ?? 1; 
+
+                    $stmt = $conn->prepare("INSERT INTO doctors (branch_id, full_name, license_number, specialization, bio, photo_url, schedule_days, start_time, end_time, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    
+                    // We added an 'i' at the start for the branch_id integer
+                    $stmt->bind_param('issssssssi', $branch_id, $full_name, $license_number, $specialization, $bio, $photo_url, $schedule_days, $start_time, $end_time, $is_active);
+                    
+                    $stmt->execute();
+                    $new_id = $conn->insert_id;
+                    $stmt->close();
+                    log_action($conn,$current_user_id,$current_user_name,'Added Doctor','doctors',$new_id,"Added: $full_name");
+                    $success = "Dr. $full_name added successfully.";
+                }
+            }
+        }
+    }
+
+    // ── TOGGLE ACTIVE ─────────────────────────────────────────────
+    if ($action === 'toggle') {
+        $id     = intval($_POST['doctor_id'] ?? 0);
+        $active = intval($_POST['is_active'] ?? 0);
+        $stmt   = $conn->prepare("UPDATE doctors SET is_active=? WHERE id=?");
+        $stmt->bind_param('ii', $active, $id);
+        $stmt->execute();
+        $stmt->close();
+        header('Location: list.php');
+        exit();
+    }
+
+    // ── DELETE DOCTOR ─────────────────────────────────────────────
+    if ($action === 'delete') {
+        $id = intval($_POST['doctor_id'] ?? 0);
+        // Unlink doctor from appointments (don't cascade delete appointments)
+        $conn->query("UPDATE appointments SET doctor_id = NULL WHERE doctor_id = $id");
+        $conn->query("DELETE FROM doctors WHERE id = $id");
+        log_action($conn,$current_user_id,$current_user_name,'Deleted Doctor','doctors',$id,"Doctor removed");
+        $success = "Doctor removed.";
+    }
+}
+
+// Load doctors for THIS BRANCH ONLY (The Privacy Wall)
+$branch_id = $_SESSION['branch_id'] ?? 1; 
+$doctors = $conn->query("SELECT * FROM doctors WHERE branch_id = $branch_id ORDER BY is_active DESC, full_name ASC")->fetch_all(MYSQLI_ASSOC);
+
+// Day labels
+$day_labels = [
+    'mon' => 'Mon', 'tue' => 'Tue', 'wed' => 'Wed',
+    'thu' => 'Thu', 'fri' => 'Fri', 'sat' => 'Sat', 'sun' => 'Sun'
+];
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head><?php include '../../includes/head.php'; ?></head>
+<body>
+<?php include '../../includes/sidebar.php'; ?>
+<div class="main-content">
+    <?php include '../../includes/header.php'; ?>
+    <div class="page-content">
+
+        <div class="page-header">
+            <div>
+                <h5>Doctors</h5>
+                <small class="text-muted"><?php echo count($doctors); ?> doctor<?php echo count($doctors) !== 1 ? 's' : ''; ?> registered</small>
+            </div>
+            <div class="page-header-actions">
+                <button class="btn btn-primary btn-sm" onclick="openDrawer()">
+                    <i class="bi bi-plus-lg"></i> Add Doctor
+                </button>
+            </div>
+        </div>
+
+        <?php if ($error): ?>
+            <div class="alert alert-danger"><?php echo htmlspecialchars($error); ?></div>
+        <?php endif; ?>
+        <?php if ($success): ?>
+            <div class="alert alert-success"><?php echo htmlspecialchars($success); ?></div>
+        <?php endif; ?>
+
+        <!-- Doctor Profile Cards Grid -->
+        <?php if (empty($doctors)): ?>
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <i class="bi bi-person-badge" style="font-size:3rem;color:var(--gray-300);"></i>
+                    <p class="mt-3 text-muted">No doctors registered yet.</p>
+                    <button class="btn btn-primary btn-sm" onclick="openDrawer()">Add First Doctor</button>
+                </div>
+            </div>
+        <?php else: ?>
+        <div class="row g-3">
+            <?php foreach ($doctors as $doc): ?>
+            <?php
+                $days_arr = array_filter(array_map('trim', explode(',', $doc['schedule_days'] ?? '')));
+                $days_html = '';
+                foreach ($day_labels as $code => $lbl) {
+                    $active_day = in_array($code, $days_arr);
+                    $days_html .= '<span class="doctor-day-badge ' . ($active_day ? 'active' : '') . '">' . $lbl . '</span>';
+                }
+            ?>
+            <div class="col-md-4 col-lg-3">
+                <div class="card doctor-card <?php echo $doc['is_active'] ? '' : 'doctor-card--inactive'; ?>">
+                    <div class="doctor-card-header">
+                        <div class="doctor-avatar-wrap">
+                            <?php if (!empty($doc['photo_url'])): ?>
+                                <img src="<?php echo BASE_URL . htmlspecialchars($doc['photo_url']); ?>"
+                                     alt="<?php echo htmlspecialchars($doc['full_name']); ?>"
+                                     class="doctor-avatar-img">
+                            <?php else: ?>
+                                <div class="doctor-avatar-placeholder">
+                                    <?php echo strtoupper(substr($doc['full_name'], 0, 2)); ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                        <div class="doctor-status-badge <?php echo $doc['is_active'] ? 'on-duty' : 'on-leave'; ?>">
+                            <span class="status-dot"></span>
+                            <?php echo $doc['is_active'] ? 'On Duty' : 'On Leave'; ?>
+                        </div>
+                    </div>
+                    <div class="doctor-card-body">
+                        <h6 class="doctor-name"><?php echo htmlspecialchars($doc['full_name']); ?></h6>
+                        <p class="doctor-spec"><?php echo htmlspecialchars($doc['specialization'] ?: 'General Dentist'); ?></p>
+                        <?php if ($doc['license_number']): ?>
+                            <p class="doctor-license"><i class="bi bi-shield-check"></i> <?php echo htmlspecialchars($doc['license_number']); ?></p>
+                        <?php endif; ?>
+                        <?php if ($doc['bio']): ?>
+                            <p class="doctor-bio"><?php echo htmlspecialchars(substr($doc['bio'], 0, 90)) . (strlen($doc['bio']) > 90 ? '…' : ''); ?></p>
+                        <?php endif; ?>
+                        <div class="doctor-schedule">
+                            <div class="schedule-time">
+                                <i class="bi bi-clock"></i>
+                                <?php echo date('h:i A', strtotime($doc['start_time'])); ?> – <?php echo date('h:i A', strtotime($doc['end_time'])); ?>
+                            </div>
+                            <div class="doctor-days"><?php echo $days_html; ?></div>
+                        </div>
+                    </div>
+                    <div class="doctor-card-footer">
+                        <button class="btn btn-sm btn-outline-primary" onclick='editDoctor(<?php echo json_encode($doc); ?>)'>
+                            <i class="bi bi-pencil"></i> Edit
+                        </button>
+                        <!-- Toggle duty status -->
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="action" value="toggle">
+                            <input type="hidden" name="doctor_id" value="<?php echo $doc['id']; ?>">
+                            <input type="hidden" name="is_active" value="<?php echo $doc['is_active'] ? 0 : 1; ?>">
+                            <button type="submit" class="btn btn-sm <?php echo $doc['is_active'] ? 'btn-outline-warning' : 'btn-outline-success'; ?>">
+                                <i class="bi bi-<?php echo $doc['is_active'] ? 'pause-circle' : 'play-circle'; ?>"></i>
+                                <?php echo $doc['is_active'] ? 'Leave' : 'Reinstate'; ?>
+                            </button>
+                        </form>
+                        <button class="btn btn-sm btn-outline-danger" onclick="confirmDelete(<?php echo $doc['id']; ?>, '<?php echo htmlspecialchars(addslashes($doc['full_name'])); ?>')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+
+    </div>
+</div>
+
+<!-- ── Add/Edit Drawer ──────────────────────────────────────── -->
+<div id="doctorDrawerOverlay" class="drawer-overlay" onclick="closeDrawer()"></div>
+<div id="doctorDrawer" class="drawer drawer-right">
+    <div class="drawer-header">
+        <h6 id="drawerTitle">Add Doctor</h6>
+        <button class="drawer-close" onclick="closeDrawer()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="drawer-body">
+        <form method="POST" enctype="multipart/form-data" id="doctorForm">
+            <input type="hidden" name="action" value="save">
+            <input type="hidden" name="doctor_id" id="f_doctor_id" value="0">
+
+            <!-- Photo Upload -->
+            <div class="mb-3 text-center">
+                <div class="doctor-photo-preview" id="photoPreview">
+                    <i class="bi bi-person-circle" style="font-size:4rem;color:var(--gray-300);"></i>
+                </div>
+                <label class="btn btn-sm btn-outline-secondary mt-2">
+                    <i class="bi bi-upload"></i> Upload Photo
+                    <input type="file" name="photo" id="photoInput" accept="image/*" style="display:none;" onchange="previewPhoto(this)">
+                </label>
+                <div class="form-text">JPG/PNG/WebP · max 2MB</div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Full Name <span class="text-danger">*</span></label>
+                <input type="text" name="full_name" id="f_full_name" class="form-control" placeholder="e.g. Dr. Jane Smith" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">License Number</label>
+                <input type="text" name="license_number" id="f_license_number" class="form-control" placeholder="e.g. PRC-0001234">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Specialization</label>
+                <input type="text" name="specialization" id="f_specialization" class="form-control" placeholder="e.g. Orthodontist, Oral Surgeon">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Bio / Description</label>
+                <textarea name="bio" id="f_bio" class="form-control" rows="3" placeholder="Short professional bio shown to patients when booking..."></textarea>
+            </div>
+
+            <label class="form-label">Working Days</label>
+            <div class="mb-3 d-flex gap-2 flex-wrap" id="dayToggles">
+                <?php foreach ($day_labels as $code => $lbl): ?>
+                <label class="day-toggle-label">
+                    <input type="checkbox" name="days_cb[]" value="<?php echo $code; ?>" class="day-cb" checked>
+                    <span class="day-toggle-btn"><?php echo $lbl; ?></span>
+                </label>
+                <?php endforeach; ?>
+            </div>
+            <!-- Hidden field assembled by JS -->
+            <input type="hidden" name="schedule_days" id="f_schedule_days" value="mon,tue,wed,thu,fri,sat">
+
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label class="form-label">Start Time</label>
+                    <input type="time" name="start_time" id="f_start_time" class="form-control" value="08:00">
+                </div>
+                <div class="col-6">
+                    <label class="form-label">End Time</label>
+                    <input type="time" name="end_time" id="f_end_time" class="form-control" value="17:00">
+                </div>
+            </div>
+
+            <div class="form-check form-switch mb-4">
+                <input class="form-check-input" type="checkbox" name="is_active" id="f_is_active" checked>
+                <label class="form-check-label" for="f_is_active">On Duty (accepting appointments)</label>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-fill">Save Doctor</button>
+                <button type="button" class="btn btn-outline-secondary" onclick="closeDrawer()">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Delete confirm form -->
+<form id="deleteForm" method="POST" style="display:none;">
+    <input type="hidden" name="action" value="delete">
+    <input type="hidden" name="doctor_id" id="delete_doctor_id">
+</form>
+
+<?php include '../../includes/footer.php'; ?>
+<style>
+/* ── Doctor Cards ────────────────────────────────────────── */
+.doctor-card {
+    border-radius: 16px;
+    overflow: hidden;
+    transition: box-shadow 0.2s, transform 0.2s;
+    border: 1px solid var(--gray-100);
+}
+.doctor-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.08); transform: translateY(-2px); }
+.doctor-card--inactive { opacity: 0.65; }
+
+.doctor-card-header {
+    background: linear-gradient(135deg, var(--primary) 0%, #5a8fff 100%);
+    padding: 24px 16px 16px;
+    text-align: center;
+    position: relative;
+}
+.doctor-avatar-wrap { display: inline-block; }
+.doctor-avatar-img {
+    width: 80px; height: 80px;
+    border-radius: 50%; object-fit: cover;
+    border: 3px solid rgba(255,255,255,0.7);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.doctor-avatar-placeholder {
+    width: 80px; height: 80px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.25);
+    border: 3px solid rgba(255,255,255,0.5);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.8rem; font-weight: 700; color: white; margin: 0 auto;
+}
+.doctor-status-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em;
+    padding: 3px 10px; border-radius: 20px; margin-top: 8px;
+    text-transform: uppercase;
+}
+.doctor-status-badge.on-duty  { background: rgba(39,174,96,0.15); color:#27ae60; border:1px solid rgba(39,174,96,0.3); }
+.doctor-status-badge.on-leave { background: rgba(231,76,60,0.15);  color:#e74c3c; border:1px solid rgba(231,76,60,0.3); }
+.status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor;
+    animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+.doctor-card-body { padding: 16px; }
+.doctor-name  { font-weight: 700; font-size: 0.95rem; margin-bottom: 2px; }
+.doctor-spec  { font-size: 0.78rem; color: var(--primary); font-weight: 600; margin-bottom: 4px; }
+.doctor-license { font-size: 0.75rem; color: var(--gray-400); margin-bottom: 6px; }
+.doctor-license i { margin-right: 3px; }
+.doctor-bio   { font-size: 0.78rem; color: var(--gray-500); margin-bottom: 10px; line-height: 1.5; }
+
+.doctor-schedule { background: var(--gray-50); border-radius: 8px; padding: 8px 10px; }
+.schedule-time { font-size: 0.75rem; color: var(--gray-600); margin-bottom: 6px; }
+.schedule-time i { margin-right: 4px; }
+.doctor-days { display: flex; flex-wrap: wrap; gap: 3px; }
+.doctor-day-badge {
+    font-size: 0.65rem; font-weight: 600; padding: 2px 7px;
+    border-radius: 4px; background: var(--gray-100); color: var(--gray-400);
+}
+.doctor-day-badge.active { background: var(--blue-500); color: white; }
+
+.doctor-card-footer {
+    padding: 10px 16px 14px;
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+    border-top: 1px solid var(--gray-100);
+}
+
+/* ── Drawer ──────────────────────────────────────────────── */
+.drawer-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.3); z-index: 1040; backdrop-filter: blur(2px);
+}
+.drawer-right {
+    position: fixed; top: 0; right: -520px; width: 480px; height: 100vh;
+    background: var(--white); z-index: 1050;
+    box-shadow: -8px 0 32px rgba(0,0,0,0.12);
+    transition: right 0.3s cubic-bezier(.4,0,.2,1);
+    display: flex; flex-direction: column;
+}
+.drawer-right.open { right: 0; }
+.drawer-header {
+    padding: 20px 24px 16px; border-bottom: 1px solid var(--gray-100);
+    display: flex; align-items: center; justify-content: space-between;
+}
+.drawer-header h6 { margin: 0; font-weight: 700; font-size: 1rem; }
+.drawer-close { background: none; border: none; cursor: pointer; font-size: 1.1rem; color: var(--gray-400); }
+.drawer-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+/* ── Photo Upload Preview ────────────────────────────────── */
+.doctor-photo-preview {
+    width: 96px; height: 96px; border-radius: 50%;
+    border: 2px dashed var(--gray-200);
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto; overflow: hidden; background: var(--gray-50);
+}
+.doctor-photo-preview img { width:100%; height:100%; object-fit:cover; }
+
+/* ── Day Toggle Checkboxes ───────────────────────────────── */
+.day-toggle-label { cursor: pointer; }
+.day-toggle-label input[type=checkbox] { display: none; }
+.day-toggle-btn {
+    display: inline-block; padding: 5px 10px; border-radius: 6px;
+    font-size: 0.78rem; font-weight: 600;
+    border: 1.5px solid var(--gray-300); background: var(--gray-100); color: var(--gray-600);
+    transition: all 0.15s;
+}
+.day-toggle-label input:checked + .day-toggle-btn {
+    background: var(--primary); color: white; border-color: var(--primary);
+}
+</style>
+<script>
+function openDrawer(doc) {
+    document.getElementById('doctorDrawerOverlay').style.display = 'block';
+    document.getElementById('doctorDrawer').classList.add('open');
+}
+function closeDrawer() {
+    document.getElementById('doctorDrawerOverlay').style.display = 'none';
+    document.getElementById('doctorDrawer').classList.remove('open');
+}
+
+function editDoctor(doc) {
+    document.getElementById('drawerTitle').textContent = 'Edit Doctor';
+    document.getElementById('f_doctor_id').value       = doc.id;
+    document.getElementById('f_full_name').value       = doc.full_name;
+    document.getElementById('f_license_number').value  = doc.license_number || '';
+    document.getElementById('f_specialization').value  = doc.specialization || '';
+    document.getElementById('f_bio').value             = doc.bio || '';
+    document.getElementById('f_start_time').value      = (doc.start_time || '08:00:00').substring(0,5);
+    document.getElementById('f_end_time').value        = (doc.end_time   || '17:00:00').substring(0,5);
+    document.getElementById('f_is_active').checked     = doc.is_active == 1;
+
+    var activeDays = (doc.schedule_days || '').split(',').map(s => s.trim());
+    document.querySelectorAll('.day-cb').forEach(function(cb) {
+        cb.checked = activeDays.includes(cb.value);
+    });
+
+    // Show existing photo
+    var preview = document.getElementById('photoPreview');
+    if (doc.photo_url) {
+        preview.innerHTML = '<img src="<?php echo BASE_URL; ?>' + doc.photo_url + '">';
+    } else {
+        preview.innerHTML = '<i class="bi bi-person-circle" style="font-size:4rem;color:var(--gray-300);"></i>';
+    }
+
+    openDrawer();
+}
+
+function confirmDelete(id, name) {
+    if (!confirm('Remove Dr. ' + name + '? Their past appointments will be kept but unlinked.')) return;
+    document.getElementById('delete_doctor_id').value = id;
+    document.getElementById('deleteForm').submit();
+}
+
+// Assemble schedule_days hidden field from checkboxes before submit
+document.getElementById('doctorForm').addEventListener('submit', function() {
+    var checked = [];
+    document.querySelectorAll('.day-cb:checked').forEach(function(cb) {
+        checked.push(cb.value);
+    });
+    document.getElementById('f_schedule_days').value = checked.join(',');
+});
+
+// Photo preview
+function previewPhoto(input) {
+    if (!input.files || !input.files[0]) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        var preview = document.getElementById('photoPreview');
+        preview.innerHTML = '<img src="' + e.target.result + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">';
+    };
+    reader.readAsDataURL(input.files[0]);
+}
+
+// Reset drawer on open-new
+document.querySelector('[onclick="openDrawer()"]') && document.querySelectorAll('[onclick="openDrawer()"]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        document.getElementById('drawerTitle').textContent = 'Add Doctor';
+        document.getElementById('doctorForm').reset();
+        document.getElementById('f_doctor_id').value = '0';
+        document.getElementById('photoPreview').innerHTML = '<i class="bi bi-person-circle" style="font-size:4rem;color:var(--gray-300);"></i>';
+        document.querySelectorAll('.day-cb').forEach(function(cb) {
+            cb.checked = !['sun'].includes(cb.value);
+        });
+    });
+});
+</script>
+</body>
+</html>
