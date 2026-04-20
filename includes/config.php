@@ -68,9 +68,18 @@ set_exception_handler(function ($e) {
     $isApi = str_contains($_SERVER['REQUEST_URI'] ?? '', '/api/');
     if ($isApi) {
         header('Content-Type: application/json');
-        echo json_encode(['status' => 'error', 'message' => 'A server error occurred.']);
+        echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
     } else {
-        include dirname(__DIR__) . '/error.php';
+        $debug = ($_ENV['APP_DEBUG'] ?? 'false') === 'true';
+        if ($debug) {
+            echo '<div style="background:#fff;padding:30px;font-family:monospace;color:#000;">';
+            echo '<h2 style="color:red;">ERROR: ' . htmlspecialchars($e->getMessage()) . '</h2>';
+            echo '<p><b>File:</b> ' . htmlspecialchars($e->getFile()) . ' &nbsp;<b>Line:</b> ' . $e->getLine() . '</p>';
+            echo '<pre style="background:#f1f5f9;padding:16px;border-radius:8px;overflow:auto;">' . htmlspecialchars($e->getTraceAsString()) . '</pre>';
+            echo '</div>';
+        } else {
+            include dirname(__DIR__) . '/error.php';
+        }
     }
     exit();
 });
