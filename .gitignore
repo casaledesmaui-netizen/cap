@@ -1,11 +1,10 @@
 # ============================================================
-# SECURITY AREA  : ENVIRONMENT CONFIGURATION (.env)
-# FILE LOCATION  : .gitignore  (root folder)
-# ============================================================
-# Tells Git to NEVER upload .env to GitHub.
-# Your DB password and credentials stay local only.
+# SECURITY — never upload credentials to GitHub
 # ============================================================
 
 .env
+
+# Only ignore the ROOT logs folder (error.log, etc.)
+# This does NOT block modules/logs/activity.php
 /logs/
-.env 
+/logs/*.log
