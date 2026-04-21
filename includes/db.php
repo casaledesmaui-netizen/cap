@@ -16,12 +16,17 @@ function load_env($path) {
 load_env(__DIR__ . '/../.env');
 
 // --- Connect to database -------------------------------------------------------
-$conn = new mysqli(
+mysqli_report(MYSQLI_REPORT_OFF);
+$conn = new mysqli();
+$conn->ssl_set(NULL, NULL, NULL, NULL, NULL);
+$conn->real_connect(
     getenv('DB_HOST') ?: ($_ENV['DB_HOST'] ?? 'localhost'),
     getenv('DB_USER') ?: ($_ENV['DB_USER'] ?? 'root'),
     getenv('DB_PASS') ?: ($_ENV['DB_PASS'] ?? ''),
-    getenv('DB_NAME') ?: ($_ENV['DB_NAME'] ?? 'cap'),
-    (int)(getenv('DB_PORT') ?: ($_ENV['DB_PORT'] ?? 3306))
+    getenv('DB_NAME') ?: ($_ENV['DB_NAME'] ?? 'railway'),
+    (int)(getenv('DB_PORT') ?: ($_ENV['DB_PORT'] ?? 3306)),
+    NULL,
+    MYSQLI_CLIENT_SSL_DONT_VERIFY_SERVER_CERT
 );
 
 if ($conn->connect_error) {
