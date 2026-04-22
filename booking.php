@@ -5,8 +5,43 @@ require_once 'includes/db.php';
 $success = false;
 $error   = '';
 
+// =============================================
+// CLINIC INFO — edit everything here
+// =============================================
+$clinic_name      = 'DentalCare';
+$clinic_tagline   = 'Trusted Dental Care in Cebu';
+$clinic_hero_h1   = 'Your Healthy Smile Starts Here';
+$clinic_hero_sub  = 'We provide compassionate, modern dental care for the whole family. From routine checkups to advanced treatments — all in a comfortable, welcoming clinic.';
+$clinic_about_h2  = 'A Clinic That Truly Cares';
+$clinic_about_sub = 'DentalCare has been serving Cebu families for over a decade with professional, gentle, and affordable dental services. We combine modern technology with a warm personal touch.';
+$clinic_phone     = '(032) 123-4567';
+$clinic_mobile    = '09XX-XXX-XXXX';
+$clinic_email     = 'hello@dentalcare.ph';
+$clinic_address   = '123 Dental Street, Cebu City, Central Visayas 6000';
+$clinic_location  = 'Cebu City, Central Visayas';
+$clinic_hours     = 'Mon – Sat · 8:00 AM – 5:00 PM';
+$clinic_hours_sat = '8:00 AM – 12:00 PM';
+$clinic_parking   = 'Free parking on-site. Accessible via jeepney routes passing Fuente Osmeña or SM Cebu.';
+$stat_patients    = '5,000+';
+$stat_years       = '10+';
+$stat_rating      = '4.9 ★';
+// =============================================
+
 $services = $conn->query("SELECT id, service_name, description, price FROM services WHERE is_active = 1 ORDER BY service_name")->fetch_all(MYSQLI_ASSOC);
 $doctors  = $conn->query("SELECT id, full_name FROM doctors WHERE is_active = 1 ORDER BY full_name")->fetch_all(MYSQLI_ASSOC);
+
+// Today's real schedule from database
+$today = date('Y-m-d');
+$today_schedule = $conn->query("
+    SELECT a.appointment_time, s.service_name, a.status
+    FROM appointments a
+    LEFT JOIN services s ON a.service_id = s.id
+    WHERE a.appointment_date = '$today'
+    AND a.status IN ('confirmed', 'pending', 'completed')
+    ORDER BY a.appointment_time ASC
+    LIMIT 5
+")->fetch_all(MYSQLI_ASSOC);
+
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $first  = trim($_POST['first_name'] ?? '');
@@ -77,7 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DentalCare Clinic — Book an Appointment</title>
+  <title><?php echo $clinic_name; ?> Clinic — Book an Appointment</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
   <style>
@@ -217,7 +252,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <nav class="nav-bar">
   <a href="#" class="nav-logo">
     <div class="nav-logo-icon"><i class="bi bi-heart-pulse-fill"></i></div>
-    <div class="nav-logo-text">DentalCare</div>
+    <div class="nav-logo-text"><?php echo $clinic_name; ?></div>
   </a>
   <div class="nav-links">
     <a href="#about">About</a>
@@ -231,10 +266,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div class="hero-content">
     <div class="hero-badge">
       <i class="bi bi-stars" style="font-size:14px;"></i>
-      Trusted Dental Care in Cebu
+      <?php echo $clinic_tagline; ?>
     </div>
-    <h1>Your <span>Healthy Smile</span> Starts Here</h1>
-    <p>We provide compassionate, modern dental care for the whole family. From routine checkups to advanced treatments — all in a comfortable, welcoming clinic.</p>
+    <h1><?php
+      // Split on first space to wrap second word in <span>
+      // For "Your Healthy Smile Starts Here" → "Your <span>Healthy Smile</span> Starts Here"
+      // We hardcode the span logic based on the variable for flexibility
+      $parts = explode(' ', $clinic_hero_h1, 2);
+      echo $parts[0] . ' <span>' . ($parts[1] ?? '') . '</span>';
+    ?></h1>
+    <p><?php echo $clinic_hero_sub; ?></p>
     <div class="hero-btns">
       <a href="#booking" class="btn-primary-custom">
         <i class="bi bi-calendar-check-fill"></i> Book Appointment
@@ -245,15 +286,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
     <div class="hero-stats">
       <div>
-        <div class="hero-stat-num">5,000+</div>
+        <div class="hero-stat-num"><?php echo $stat_patients; ?></div>
         <div class="hero-stat-label">Happy Patients</div>
       </div>
       <div>
-        <div class="hero-stat-num">10+</div>
+        <div class="hero-stat-num"><?php echo $stat_years; ?></div>
         <div class="hero-stat-label">Years of Service</div>
       </div>
       <div>
-        <div class="hero-stat-num">4.9 ★</div>
+        <div class="hero-stat-num"><?php echo $stat_rating; ?></div>
         <div class="hero-stat-label">Patient Rating</div>
       </div>
     </div>
@@ -268,31 +309,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <div class="hc-sub"><?php echo date('l — M d, Y'); ?></div>
         </div>
       </div>
-      <div class="schedule-row">
-        <span class="schedule-time">8:00 AM</span>
-        <span class="schedule-name">Dental Checkup</span>
-        <span class="status-dot dot-green"></span>
-      </div>
-      <div class="schedule-row">
-        <span class="schedule-time">9:30 AM</span>
-        <span class="schedule-name">Teeth Cleaning</span>
-        <span class="status-dot dot-blue"></span>
-      </div>
-      <div class="schedule-row">
-        <span class="schedule-time">11:00 AM</span>
-        <span class="schedule-name">Root Canal</span>
-        <span class="status-dot dot-orange"></span>
-      </div>
-      <div class="schedule-row">
-        <span class="schedule-time">2:00 PM</span>
-        <span class="schedule-name">Teeth Whitening</span>
-        <span class="status-dot dot-green"></span>
-      </div>
+      <?php if (empty($today_schedule)): ?>
+        <div style="padding:16px 0;text-align:center;color:#94a3b8;font-size:0.82rem;">
+          No appointments scheduled today
+        </div>
+      <?php else: ?>
+        <?php foreach ($today_schedule as $appt):
+          $dot = match($appt['status']) {
+            'completed' => '#16a34a',
+            'confirmed' => '#2563eb',
+            default     => '#f59e0b'
+          };
+        ?>
+        <div class="schedule-row">
+          <span class="schedule-time">
+            <?php echo date('g:i A', strtotime($appt['appointment_time'])); ?>
+          </span>
+          <span class="schedule-name">
+            <?php echo htmlspecialchars($appt['service_name'] ?? 'Appointment'); ?>
+          </span>
+          <span style="width:8px;height:8px;border-radius:50%;background:<?php echo $dot; ?>;display:inline-block;flex-shrink:0;"></span>
+        </div>
+        <?php endforeach; ?>
+      <?php endif; ?>
     </div>
     <div class="hero-cards-row">
       <div class="mini-card">
         <div class="mini-card-num" style="color:#16a34a;">Open</div>
-        <div class="mini-card-label">Mon – Sat · 8am–5pm</div>
+        <div class="mini-card-label"><?php echo $clinic_hours; ?></div>
       </div>
       <div class="mini-card">
         <div class="mini-card-num">15 min</div>
@@ -307,8 +351,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <div class="about-grid">
       <div>
         <div class="section-label">About Us</div>
-        <h2 class="section-title">A Clinic That Truly Cares</h2>
-        <p class="section-sub">DentalCare has been serving Cebu families for over a decade with professional, gentle, and affordable dental services. We combine modern technology with a warm personal touch.</p>
+        <h2 class="section-title"><?php echo $clinic_about_h2; ?></h2>
+        <p class="section-sub"><?php echo $clinic_about_sub; ?></p>
         <div class="about-features">
           <div class="about-feature">
             <div class="about-feature-icon"><i class="bi bi-shield-check-fill"></i></div>
@@ -345,28 +389,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <div class="aic-icon"><i class="bi bi-clock-fill"></i></div>
           <div>
             <div class="aic-label">Operating Hours</div>
-            <div class="aic-value">Mon – Sat · 8:00 AM – 5:00 PM</div>
+            <div class="aic-value"><?php echo $clinic_hours; ?></div>
           </div>
         </div>
         <div class="about-info-card">
           <div class="aic-icon"><i class="bi bi-telephone-fill"></i></div>
           <div>
             <div class="aic-label">Call Us</div>
-            <div class="aic-value">(032) 123-4567 · 09XX-XXX-XXXX</div>
+            <div class="aic-value"><?php echo $clinic_phone; ?> · <?php echo $clinic_mobile; ?></div>
           </div>
         </div>
         <div class="about-info-card">
           <div class="aic-icon"><i class="bi bi-geo-alt-fill"></i></div>
           <div>
             <div class="aic-label">Branch Location</div>
-            <div class="aic-value">Cebu City, Central Visayas</div>
+            <div class="aic-value"><?php echo $clinic_location; ?></div>
           </div>
         </div>
         <div class="about-info-card">
           <div class="aic-icon" style="background:#f0fdf4; color:#16a34a;"><i class="bi bi-emoji-smile-fill"></i></div>
           <div>
             <div class="aic-label">Patients Served</div>
-            <div class="aic-value" style="color:#16a34a;">5,000+ Happy Smiles</div>
+            <div class="aic-value" style="color:#16a34a;"><?php echo $stat_patients; ?> Happy Smiles</div>
           </div>
         </div>
       </div>
@@ -416,7 +460,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   <div style="max-width:1100px; margin: 0 auto;">
     <div class="section-label">Find Us</div>
     <h2 class="section-title">Visit Our Clinic</h2>
-    <p class="section-sub">Conveniently located in Cebu City. Easily accessible by jeepney, taxi, or private vehicle.</p>
+    <p class="section-sub">Conveniently located in <?php echo $clinic_location; ?>. Easily accessible by jeepney, taxi, or private vehicle.</p>
     <div class="location-grid">
       <div class="location-map">
         <iframe
@@ -429,28 +473,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <div class="loc-item-icon"><i class="bi bi-geo-alt-fill"></i></div>
           <div>
             <h4>Address</h4>
-            <p>123 Dental Street, Cebu City<br>Central Visayas, Philippines 6000</p>
+            <p><?php echo $clinic_address; ?></p>
           </div>
         </div>
         <div class="loc-item">
           <div class="loc-item-icon"><i class="bi bi-clock-fill"></i></div>
           <div>
             <h4>Operating Hours</h4>
-            <p>Monday – Friday: 8:00 AM – 5:00 PM<br>Saturday: 8:00 AM – 12:00 PM<br>Sunday: Closed</p>
+            <p>Monday – Friday: 8:00 AM – 5:00 PM<br>Saturday: <?php echo $clinic_hours_sat; ?><br>Sunday: Closed</p>
           </div>
         </div>
         <div class="loc-item">
           <div class="loc-item-icon"><i class="bi bi-telephone-fill"></i></div>
           <div>
             <h4>Contact</h4>
-            <p>Landline: (032) 123-4567<br>Mobile: 09XX-XXX-XXXX<br>Email: hello@dentalcare.ph</p>
+            <p>Landline: <?php echo $clinic_phone; ?><br>Mobile: <?php echo $clinic_mobile; ?><br>Email: <?php echo $clinic_email; ?></p>
           </div>
         </div>
         <div class="loc-item">
           <div class="loc-item-icon"><i class="bi bi-car-front-fill"></i></div>
           <div>
             <h4>Getting Here</h4>
-            <p>Free parking on-site. Accessible via jeepney routes passing Fuente Osmeña or SM Cebu.</p>
+            <p><?php echo $clinic_parking; ?></p>
           </div>
         </div>
       </div>
@@ -555,8 +599,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </section>
 
 <footer class="footer">
-  <p style="margin:0 0 8px;"><strong style="color:#fff;">DentalCare Clinic</strong> · Iloilo City, Philippines</p>
-  <p style="margin:0;">© <?php echo date('Y'); ?> DentalCare. All rights reserved. &nbsp;·&nbsp; <a href="<?php echo BASE_URL; ?>index.php">Staff Login</a></p>
+  <p style="margin:0 0 8px;"><strong style="color:#fff;"><?php echo $clinic_name; ?> Clinic</strong> · <?php echo $clinic_location; ?></p>
+  <p style="margin:0;">© <?php echo date('Y'); ?> <?php echo $clinic_name; ?>. All rights reserved. &nbsp;·&nbsp; <a href="<?php echo BASE_URL; ?>index.php">Staff Login</a></p>
 </footer>
 
 </body>
