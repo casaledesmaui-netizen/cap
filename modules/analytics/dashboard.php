@@ -30,6 +30,59 @@ $sql_cur_end    = $month_end;
 $sql_prev_start = $prev_start;
 $sql_prev_end   = $prev_end;
 
+// ── Range filter (overrides month window when set) ────────────
+$range = $_GET['range'] ?? 'month';
+if (!in_array($range, ['7days','30days','month','year'])) $range = 'month';
+if ($range === '7days') {
+    $sql_cur_start = date('Y-m-d', strtotime('-6 days'));
+    $sql_cur_end   = date('Y-m-d');
+    $range_label   = 'Last 7 Days';
+} elseif ($range === '30days') {
+    $sql_cur_start = date('Y-m-d', strtotime('-29 days'));
+    $sql_cur_end   = date('Y-m-d');
+    $range_label   = 'Last 30 Days';
+} elseif ($range === 'year') {
+    $sql_cur_start = date('Y-01-01');
+    $sql_cur_end   = date('Y-m-d');
+    $range_label   = 'Year to Date (' . date('Y') . ')';
+} else {
+    $range_label = $month_label;
+}
+
+// ── Today's Appointments ─────────────────────────────────────
+$appts_today = (int)$conn->query("
+    SELECT COUNT(*) as c FROM appointments
+    WHERE appointment_date = CURDATE()
+")->fetch_assoc()['c'];
+
+// ── Pending Bills (unpaid / partial) ────────────────────────
+$pending_bills = (float)$conn->query("
+    SELECT COALESCE(SUM(amount_due - amount_paid), 0) as total
+    FROM bills WHERE status IN ('unpaid','partial')
+")->fetch_assoc()['total'];
+
+// ── Daily Appointments for selected range (peaks & valleys) ──
+$daily_raw = $conn->query("
+    SELECT appointment_date as day, COUNT(*) as total
+    FROM appointments
+    WHERE appointment_date BETWEEN '$sql_cur_start' AND '$sql_cur_end'
+    GROUP BY appointment_date ORDER BY appointment_date ASC
+")->fetch_all(MYSQLI_ASSOC);
+$daily_map = [];
+foreach ($daily_raw as $row) { $daily_map[$row['day']] = (int)$row['total']; }
+$daily_labels = []; $daily_values = [];
+$cursor = strtotime($sql_cur_start);
+$end_ts = strtotime($sql_cur_end);
+$span_days = ($end_ts - $cursor) / 86400;
+while ($cursor <= $end_ts) {
+    $d = date('Y-m-d', $cursor);
+    $daily_labels[] = $span_days > 14 ? date('M j', $cursor) : date('D j', $cursor);
+    $daily_values[] = $daily_map[$d] ?? 0;
+    $cursor = strtotime('+1 day', $cursor);
+}
+$daily_labels_json = json_encode($daily_labels);
+$daily_values_json = json_encode($daily_values);
+
 // ============================================================
 // KPI — Current Month
 // ============================================================
@@ -316,25 +369,41 @@ $pb_returning   = json_encode(array_column($patient_breakdown, 'returning_count'
                 <h5>Analytics Dashboard</h5>
                 <p style="color:var(--gray-500);font-size:0.85rem;margin:0;">
                     <i class="bi bi-calendar3" style="margin-right:5px;"></i>
-                    <?php echo $month_label; ?> — monthly snapshot
+                    <?php echo $range_label; ?>
                 </p>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;">
-                <a href="?month=<?php echo $prev_month; ?>" class="btn btn-sm btn-outline-secondary" title="Previous month">
+            <!-- Range filter tabs -->
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <?php
+                $tabs = [
+                    '7days'  => 'Last 7 Days',
+                    '30days' => 'Last 30 Days',
+                    'month'  => 'This Month',
+                    'year'   => 'This Year',
+                ];
+                foreach ($tabs as $key => $label):
+                    $active = ($range === $key);
+                    $href = '?range=' . $key . ($key === 'month' ? '&month=' . $selected_month : '');
+                    $style = $active
+                        ? 'padding:6px 14px;border-radius:20px;font-size:0.78rem;font-weight:700;background:#2563eb;color:#fff;border:none;cursor:pointer;text-decoration:none;'
+                        : 'padding:6px 14px;border-radius:20px;font-size:0.78rem;font-weight:500;background:var(--gray-100);color:var(--gray-600);border:none;cursor:pointer;text-decoration:none;transition:background 0.15s;';
+                ?>
+                <a href="<?php echo $href; ?>" style="<?php echo $style; ?>"><?php echo $label; ?></a>
+                <?php endforeach; ?>
+                <?php if ($range === 'month'): ?>
+                <span style="width:1px;height:20px;background:var(--gray-200);margin:0 4px;"></span>
+                <a href="?range=month&month=<?php echo $prev_month; ?>" class="btn btn-sm btn-outline-secondary" title="Previous month" style="padding:4px 8px;">
                     <i class="bi bi-chevron-left"></i>
                 </a>
-                <div class="month-pill">
-                    <i class="bi bi-calendar-range"></i>
-                    <?php echo date('M 1', strtotime($month_start)) . ' – ' . date('M d, Y', strtotime($month_end)); ?>
-                </div>
                 <?php if (!$is_future): ?>
-                <a href="?month=<?php echo $next_month; ?>" class="btn btn-sm btn-outline-secondary" title="Next month">
+                <a href="?range=month&month=<?php echo $next_month; ?>" class="btn btn-sm btn-outline-secondary" title="Next month" style="padding:4px 8px;">
                     <i class="bi bi-chevron-right"></i>
                 </a>
                 <?php else: ?>
-                <button class="btn btn-sm btn-outline-secondary" disabled title="No future data">
+                <button class="btn btn-sm btn-outline-secondary" disabled style="padding:4px 8px;">
                     <i class="bi bi-chevron-right"></i>
                 </button>
+                <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>
@@ -362,29 +431,47 @@ $pb_returning   = json_encode(array_column($patient_breakdown, 'returning_count'
                 </div>
             </div>
 
-            <!-- Appointment Booking Rate -->
+            <!-- Appointments Today -->
             <div class="an-kpi-card">
                 <div class="an-kpi-icon teal"><i class="bi bi-calendar-check-fill"></i></div>
                 <div style="flex:1;min-width:0;">
-                    <div class="an-kpi-label">Completion Rate</div>
-                    <div class="an-kpi-value"><?php echo $booking_rate; ?>%</div>
-                    <?php echo trend_badge($booking_rate, $prev_booking_rate); ?>
+                    <div class="an-kpi-label">Appointments Today</div>
+                    <div class="an-kpi-value"><?php echo $appts_today; ?></div>
+                    <span class="kpi-trend neutral"><?php echo date('l, M j'); ?></span>
                 </div>
             </div>
 
-            <!-- Patient Retention -->
+            <!-- Pending Bills -->
             <div class="an-kpi-card">
-                <div class="an-kpi-icon indigo"><i class="bi bi-arrow-repeat"></i></div>
+                <div class="an-kpi-icon indigo"><i class="bi bi-receipt-cutoff"></i></div>
                 <div style="flex:1;min-width:0;">
-                    <div class="an-kpi-label">Patient Retention</div>
-                    <div class="an-kpi-value"><?php echo $retention_pct; ?>%</div>
-                    <?php echo trend_badge($retention_pct, $prev_retention_pct); ?>
+                    <div class="an-kpi-label">Pending Bills</div>
+                    <div class="an-kpi-value sm">₱<?php echo number_format($pending_bills, 0); ?></div>
+                    <span class="kpi-trend <?php echo $pending_bills > 0 ? 'down' : 'up'; ?>">
+                        <?php echo $pending_bills > 0 ? 'Needs collection' : 'All settled'; ?>
+                    </span>
                 </div>
             </div>
 
         </div><!-- /kpi grid -->
 
-        <!-- ── ROW 2: Revenue Trend (left) + Appointment Breakdown (right) -->
+        <!-- ── DAILY ACTIVITY: Appointments per Day ───────────── -->
+        <div class="an-chart-row" style="grid-template-columns:1fr;margin-bottom:20px;">
+            <div class="an-card">
+                <div class="an-card-head">
+                    <div class="an-card-head-title">
+                        <i class="bi bi-activity" style="color:#2563eb;"></i>
+                        Daily Appointment Activity
+                    </div>
+                    <span class="an-card-head-sub"><?php echo $range_label; ?> — peaks &amp; busy days</span>
+                </div>
+                <div class="an-card-body">
+                    <div style="position:relative;height:200px;">
+                        <canvas id="dailyApptChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="an-chart-row cols-8-4">
 
             <!-- Revenue Trend & Projection -->
@@ -719,7 +806,64 @@ function noDataPlugin(msg) {
     }).join('');
 })();
 
-// ── 3. Patient Growth Stacked Bar ────────────────────────────
+// ── 4. Daily Appointment Activity ────────────────────────────
+(function() {
+    var dLabels = <?php echo $daily_labels_json ?: '[]'; ?>;
+    var dValues = <?php echo $daily_values_json ?: '[]'; ?>.map(Number);
+    var maxVal  = Math.max(...dValues, 1);
+
+    new Chart(document.getElementById('dailyApptChart'), {
+        type: 'bar',
+        plugins: [noDataPlugin('No appointments in this period')],
+        data: {
+            labels: dLabels,
+            datasets: [{
+                label: 'Appointments',
+                data: dValues,
+                backgroundColor: dValues.map(v => {
+                    if (v === 0)        return 'rgba(203,213,225,0.4)';
+                    if (v >= maxVal)    return 'rgba(37,99,235,0.85)';  // busiest day
+                    if (v >= maxVal * 0.7) return 'rgba(37,99,235,0.6)';
+                    return 'rgba(37,99,235,0.35)';
+                }),
+                borderRadius: 6,
+                borderSkipped: false,
+            }]
+        },
+        options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ' ' + ctx.parsed.y + ' appointment' + (ctx.parsed.y !== 1 ? 's' : '')
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ...scaleBase,
+                    grid: { display: false },
+                    ticks: {
+                        ...scaleBase.ticks,
+                        maxTicksLimit: 20,
+                        maxRotation: 45
+                    }
+                },
+                y: {
+                    ...scaleBase,
+                    beginAtZero: true,
+                    ticks: {
+                        ...scaleBase.ticks,
+                        stepSize: 1,
+                        precision: 0
+                    }
+                }
+            }
+        }
+    });
+})();
+
 (function() {
     var pbLabels    = <?php echo $pb_labels    ?: '[]'; ?>;
     var pbNew       = <?php echo $pb_new       ?: '[]'; ?>;

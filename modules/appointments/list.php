@@ -78,170 +78,233 @@ $appointments = $conn->query("
     <?php include '../../includes/header.php'; ?>
     <div class="page-content">
 
-        <div class="page-header">
-            <div>
-                <h5>Appointments</h5>
+        <!-- ── Page Header ─────────────────────────────────────── -->
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px;background:var(--white);border:var(--border);border-radius:14px;padding:12px 18px;box-shadow:0 1px 6px rgba(0,0,0,0.05);">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div style="width:40px;height:40px;background:linear-gradient(135deg,#2563eb,#60a5fa);border-radius:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <i class="bi bi-calendar2-check" style="color:var(--white);font-size:1.1rem;"></i>
+                </div>
+                <div>
+                    <div style="font-size:1rem;font-weight:800;color:var(--gray-900);line-height:1.1;">Appointments</div>
+                    <div style="font-size:0.72rem;color:var(--gray-400);font-weight:500;"><?php echo number_format($total_count); ?> total record<?php echo $total_count !== 1 ? 's' : ''; ?></div>
+                </div>
             </div>
-            <div class="page-header-actions">
-                <button onclick="openWalkinDrawer()" class="btn btn-success btn-sm">
-                    <i class="bi bi-person-walking"></i> New Appointment
+            <div style="margin-left:auto;">
+                <button onclick="openWalkinDrawer()" style="display:inline-flex;align-items:center;gap:7px;padding:9px 20px;border-radius:10px;background:linear-gradient(135deg,#16a34a,#22c55e);color:var(--white);border:none;font-size:0.84rem;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(22,163,74,0.3);transition:all 0.15s;" onmouseover="this.style.boxShadow='0 4px 14px rgba(22,163,74,0.45)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(22,163,74,0.3)'">
+                    <i class="bi bi-plus-circle-fill" style="font-size:0.95rem;"></i> New Appointment
                 </button>
             </div>
         </div>
 
-        <!-- Filters -->
-        <form method="GET" class="row g-2 mb-3">
-            <div class="col-md-3">
-                <input type="text" name="search" class="form-control form-control-sm" placeholder="Search patient or code..." value="<?php echo htmlspecialchars($search); ?>">
-            </div>
-            <div class="col-md-2">
-                <input type="date" name="date" class="form-control form-control-sm" value="<?php echo htmlspecialchars($date_filter); ?>">
-            </div>
-            <div class="col-md-2">
-                <select name="status" class="form-select form-select-sm">
-                    <option value="">All Status</option>
-                    <option value="pending"   <?php echo $status_filter === 'pending'   ? 'selected' : ''; ?>>Pending</option>
-                    <option value="confirmed" <?php echo $status_filter === 'confirmed' ? 'selected' : ''; ?>>Confirmed</option>
-                    <option value="completed" <?php echo $status_filter === 'completed' ? 'selected' : ''; ?>>Completed</option>
-                    <option value="cancelled" <?php echo $status_filter === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
-                    <option value="no-show"   <?php echo $status_filter === 'no-show'   ? 'selected' : ''; ?>>No-show</option>
-                </select>
-            </div>
-            <?php if (!empty($all_doctors)): ?>
-            <div class="col-md-2">
-                <select name="doctor_id" class="form-select form-select-sm">
+        <!-- ── Quick Status Tabs ────────────────────────────────── -->
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;">
+            <?php
+            $tab_statuses = [
+                '' => ['label'=>'All', 'icon'=>'bi-grid-3x3-gap', 'color'=>'#2563eb', 'bg'=>'#eff6ff', 'border'=>'#bfdbfe'],
+                'pending'   => ['label'=>'Pending',   'icon'=>'bi-clock', 'color'=>'#d97706', 'bg'=>'#fffbeb', 'border'=>'#fde68a'],
+                'confirmed' => ['label'=>'Confirmed', 'icon'=>'bi-check-circle', 'color'=>'#2563eb', 'bg'=>'#eff6ff', 'border'=>'#bfdbfe'],
+                'completed' => ['label'=>'Completed', 'icon'=>'bi-check2-all', 'color'=>'#16a34a', 'bg'=>'#f0fdf4', 'border'=>'#bbf7d0'],
+                'cancelled' => ['label'=>'Cancelled', 'icon'=>'bi-x-circle', 'color'=>'#dc2626', 'bg'=>'#fff1f2', 'border'=>'#fecdd3'],
+                'no-show'   => ['label'=>'No-show',   'icon'=>'bi-person-dash', 'color'=>'#64748b', 'bg'=>'var(--gray-50)', 'border'=>'#e2e8f0'],
+            ];
+            foreach ($tab_statuses as $val => $tab):
+                $isActive = ($status_filter === $val);
+                $href = 'list.php?' . ($val ? 'status=' . $val . '&' : '') . ($search ? 'search=' . urlencode($search) . '&' : '') . ($doctor_filter ? 'doctor_id=' . $doctor_filter . '&' : '');
+            ?>
+            <a href="<?php echo $href; ?>" style="display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:20px;font-size:0.76rem;font-weight:700;text-decoration:none;transition:all 0.15s;
+                border:1.5px solid <?php echo $isActive ? $tab['color'] : '#e2e8f0'; ?>;
+                background:<?php echo $isActive ? $tab['bg'] : 'var(--white)'; ?>;
+                color:<?php echo $isActive ? $tab['color'] : '#64748b'; ?>;
+                box-shadow:<?php echo $isActive ? '0 2px 8px rgba(0,0,0,0.08)' : 'none'; ?>;">
+                <i class="bi <?php echo $tab['icon']; ?>"></i>
+                <?php echo $tab['label']; ?>
+            </a>
+            <?php endforeach; ?>
+        </div>
+
+        <!-- ── Filter Bar ───────────────────────────────────────── -->
+        <form method="GET" style="background:var(--white);border:var(--border);border-radius:12px;padding:12px 16px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,0.04);">
+            <?php if ($status_filter): ?><input type="hidden" name="status" value="<?php echo htmlspecialchars($status_filter); ?>"><?php endif; ?>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+                <div style="position:relative;flex:1;min-width:200px;">
+                    <i class="bi bi-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--gray-400);font-size:0.82rem;"></i>
+                    <input type="text" name="search" style="width:100%;padding:8px 12px 8px 32px;border:1.5px solid var(--gray-200);border-radius:9px;font-size:0.82rem;outline:none;transition:border 0.15s;" placeholder="Search patient or code…" value="<?php echo htmlspecialchars($search); ?>" onfocus="this.style.borderColor='#2563eb'" onblur="this.style.borderColor='#e2e8f0'">
+                </div>
+                <div style="position:relative;">
+                    <i class="bi bi-calendar3" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--gray-400);font-size:0.82rem;pointer-events:none;"></i>
+                    <input type="date" name="date" style="padding:8px 12px 8px 32px;border:1.5px solid var(--gray-200);border-radius:9px;font-size:0.82rem;outline:none;transition:border 0.15s;" value="<?php echo htmlspecialchars($date_filter); ?>" onfocus="this.style.borderColor='#2563eb'" onblur="this.style.borderColor='#e2e8f0'">
+                </div>
+                <?php if (!empty($all_doctors)): ?>
+                <select name="doctor_id" style="padding:8px 14px;border:1.5px solid var(--gray-200);border-radius:9px;font-size:0.82rem;outline:none;background:var(--white);color:var(--gray-600);transition:border 0.15s;" onfocus="this.style.borderColor='#2563eb'" onblur="this.style.borderColor='#e2e8f0'">
                     <option value="">All Doctors</option>
                     <?php foreach ($all_doctors as $d): ?>
-                        <option value="<?php echo $d['id']; ?>" <?php echo $doctor_filter == $d['id'] ? 'selected' : ''; ?>>
-                            <?php echo htmlspecialchars($d['full_name']); ?>
-                        </option>
+                    <option value="<?php echo $d['id']; ?>" <?php echo $doctor_filter == $d['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($d['full_name']); ?></option>
                     <?php endforeach; ?>
                 </select>
-            </div>
-            <?php endif; ?>
-            <div class="col-md-2">
-                <button class="btn btn-sm btn-outline-secondary w-100" type="submit">Filter</button>
-            </div>
-            <div class="col-md-1">
-                <a href="list.php" class="btn btn-sm btn-outline-danger w-100">Clear</a>
+                <?php endif; ?>
+                <button type="submit" style="padding:8px 20px;border-radius:9px;background:#2563eb;color:var(--white);border:none;font-size:0.82rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:6px;transition:background 0.15s;" onmouseover="this.style.background='#1d4ed8'" onmouseout="this.style.background='#2563eb'">
+                    <i class="bi bi-funnel-fill"></i> Filter
+                </button>
+                <?php if ($search || $date_filter || $doctor_filter || $status_filter): ?>
+                <a href="list.php" style="padding:8px 16px;border-radius:9px;border:1.5px solid #fca5a5;background:var(--danger-bg);color:var(--danger);font-size:0.82rem;font-weight:700;text-decoration:none;display:flex;align-items:center;gap:5px;">
+                    <i class="bi bi-x-lg"></i> Clear
+                </a>
+                <?php endif; ?>
             </div>
         </form>
 
-        <div class="card">
-            <div class="card-body p-0">
-                <table class="table table-hover mb-0" id="appointmentsTable">
-                    <thead>
-                        <tr>
-                            <th>Code</th>
-                            <th>Patient</th>
-                            <th>Service</th>
-                            <th>Doctor</th>
-                            <th>Date</th>
-                            <th>Time</th>
-                            <th>Status</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php if (empty($appointments)): ?>
-                            <tr><td colspan="8" class="text-center text-muted py-3">No appointments found.</td></tr>
-                        <?php else: ?>
-                            <?php foreach ($appointments as $a): ?>
-                            <tr>
-                                <td><?php echo htmlspecialchars($a['appointment_code']); ?></td>
-                                <td><?php echo htmlspecialchars(ucwords(strtolower($a['patient_name']))); ?></td>
-                                <td><?php echo htmlspecialchars($a['service_name'] ?? 'N/A'); ?></td>
-                                <td>
-                                    <?php if (!empty($a['doctor_name'])): ?>
-                                        <span class="badge rounded-pill" style="background:var(--primary);opacity:0.85;font-size:0.72rem;">
-                                            <?php echo htmlspecialchars($a['doctor_name']); ?>
-                                        </span>
-                                    <?php else: ?>
-                                        <span class="text-muted" style="font-size:0.8rem;">—</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td><?php echo date('M d, Y', strtotime($a['appointment_date'])); ?></td>
-                                <td><?php echo date('h:i A', strtotime($a['appointment_time'])); ?></td>
-                                <td>
-                                    <span class="badge bg-<?php
-                                        echo match($a['status']) {
-                                            'pending'   => 'warning',
-                                            'confirmed' => 'primary',
-                                            'completed' => 'success',
-                                            'cancelled' => 'danger',
-                                            'no-show'   => 'secondary',
-                                            default     => 'light'
-                                        };
-                                    ?>"><?php echo ucfirst($a['status']); ?></span>
-                                </td>
-                                <td>
-                                    <div style="display:flex;gap:5px;flex-wrap:wrap;">
-                                        <?php if ($a['status'] === 'confirmed'): ?>
-                                        <!-- CHECK-IN: leads to dental record then billing -->
-                                        <a href="<?php echo BASE_URL; ?>modules/treatments/add.php?patient_id=<?php echo $a['patient_id']; ?>&appointment_id=<?php echo $a['id']; ?>"
-                                           class="btn btn-sm btn-success" title="Check-in: Record Treatment">
-                                            <i class="bi bi-person-check"></i> Check-in
-                                        </a>
-                                        <?php elseif ($a['status'] === 'completed'): ?>
-                                        <!-- VIEW RECORD for completed appointments -->
-                                        <a href="<?php echo BASE_URL; ?>modules/patients/view.php?id=<?php echo $a['patient_id']; ?>"
-                                           class="btn btn-sm btn-outline-success" title="View Patient Record">
-                                            <i class="bi bi-clipboard2-check"></i> Record
-                                        </a>
-                                        <!-- BILL: show View Bill if exists, Create Bill if not -->
-                                        <?php if (!empty($a['bill_id'])): ?>
-                                        <a href="<?php echo BASE_URL; ?>modules/billing/view.php?id=<?php echo $a['bill_id']; ?>"
-                                           class="btn btn-sm <?php echo $a['bill_status'] === 'paid' ? 'btn-success' : 'btn-warning'; ?>" title="View Bill">
-                                            <i class="bi bi-receipt"></i>
-                                            <?php echo $a['bill_status'] === 'paid' ? 'Paid' : 'View Bill'; ?>
-                                        </a>
-                                        <?php else: ?>
-                                        <a href="<?php echo BASE_URL; ?>modules/billing/create.php?patient_id=<?php echo $a['patient_id']; ?>&appointment_id=<?php echo $a['id']; ?>"
-                                           class="btn btn-sm btn-outline-primary" title="Create Bill">
-                                            <i class="bi bi-receipt"></i> Bill
-                                        </a>
-                                        <?php endif; ?>
-                                        <?php elseif ($a['status'] === 'pending'): ?>
-                                        <!-- CONFIRM pending appointments -->
-                                        <button class="btn btn-sm btn-outline-primary" onclick="openConfirmModal(<?php echo $a['id']; ?>, '<?php echo htmlspecialchars($a['appointment_code'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($a['patient_name'], ENT_QUOTES); ?>')" title="Confirm Appointment">
-                                            <i class="bi bi-check-lg"></i> Confirm
-                                        </button>
-                                        <?php endif; ?>
-                                        <a href="<?php echo BASE_URL; ?>modules/print/appointment_slip.php?id=<?php echo $a['id']; ?>"
-                                           target="_blank" class="btn btn-sm btn-outline-secondary" title="Print Slip">
-                                            <i class="bi bi-printer"></i>
-                                        </a>
-                                        <button class="btn btn-sm btn-outline-secondary" onclick="updateStatus(<?php echo $a['id']; ?>, this)" title="Update Status">
-                                            <i class="bi bi-pencil-square"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-danger" onclick="confirmDeleteAppt(<?php echo $a['id']; ?>, '<?php echo htmlspecialchars($a['appointment_code'], ENT_QUOTES); ?>')" title="Delete">
-                                            <i class="bi bi-trash"></i>
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
+        <!-- ── Table ────────────────────────────────────────────── -->
+        <div style="background:var(--white);border-radius:14px;border:var(--border);overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
+            <table style="width:100%;border-collapse:collapse;" id="appointmentsTable">
+                <thead>
+                    <tr style="background:linear-gradient(to bottom,#f8fafc,var(--gray-100));border-bottom:2px solid var(--gray-200);">
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Code</th>
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Patient</th>
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Service</th>
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Doctor</th>
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Date & Time</th>
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Status</th>
+                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-400);text-align:left;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (empty($appointments)): ?>
+                    <tr>
+                        <td colspan="7" style="padding:60px 20px;text-align:center;color:var(--gray-400);">
+                            <i class="bi bi-calendar-x" style="font-size:2.5rem;display:block;margin-bottom:12px;opacity:0.5;"></i>
+                            <div style="font-size:0.9rem;font-weight:600;">No appointments found.</div>
+                            <div style="font-size:0.78rem;margin-top:4px;">Try adjusting your filters or add a new appointment.</div>
+                        </td>
+                    </tr>
+                    <?php else: ?>
+                    <?php foreach ($appointments as $a):
+                        $isToday = ($a['appointment_date'] === date('Y-m-d'));
+                        $rowBg = $isToday ? 'background:linear-gradient(to right,var(--blue-50),var(--white));' : '';
+                        // Status config
+                        $sCfg = match($a['status']) {
+                            'pending'   => ['bg'=>'#fffbeb','color'=>'#d97706','border'=>'#fde68a','label'=>'Pending',   'icon'=>'bi-clock-history'],
+                            'confirmed' => ['bg'=>'#eff6ff','color'=>'#2563eb','border'=>'#bfdbfe','label'=>'Confirmed', 'icon'=>'bi-check-circle-fill'],
+                            'completed' => ['bg'=>'#f0fdf4','color'=>'#16a34a','border'=>'#bbf7d0','label'=>'Completed', 'icon'=>'bi-check2-all'],
+                            'cancelled' => ['bg'=>'#fff1f2','color'=>'#dc2626','border'=>'#fecdd3','label'=>'Cancelled', 'icon'=>'bi-x-circle-fill'],
+                            'no-show'   => ['bg'=>'var(--gray-50)','color'=>'#64748b','border'=>'#e2e8f0','label'=>'No-show',   'icon'=>'bi-person-dash'],
+                            default     => ['bg'=>'var(--gray-50)','color'=>'#94a3b8','border'=>'#e2e8f0','label'=>ucfirst($a['status']),'icon'=>'bi-circle'],
+                        };
+                    ?>
+                    <tr style="<?php echo $rowBg; ?>border-bottom:1px solid var(--gray-100);transition:background 0.15s;" onmouseover="this.style.background='var(--gray-50)'" onmouseout="this.style.background='<?php echo $isToday ? 'linear-gradient(to right,var(--blue-50),var(--white))' : 'var(--white)'; ?>'">
+                        <!-- Code -->
+                        <td style="padding:13px 16px;">
+                            <div style="display:flex;align-items:center;gap:6px;">
+                                <?php if ($isToday): ?><span style="width:6px;height:6px;border-radius:50%;background:#2563eb;display:inline-block;flex-shrink:0;box-shadow:0 0 0 2px #bfdbfe;"></span><?php endif; ?>
+                                <span style="font-size:0.79rem;font-weight:700;color:var(--primary);font-family:monospace;"><?php echo htmlspecialchars($a['appointment_code']); ?></span>
+                            </div>
+                        </td>
+                        <!-- Patient -->
+                        <td style="padding:13px 16px;">
+                            <div style="font-size:0.85rem;font-weight:700;color:var(--gray-900);"><?php echo htmlspecialchars(ucwords(strtolower($a['patient_name']))); ?></div>
+                        </td>
+                        <!-- Service -->
+                        <td style="padding:13px 16px;">
+                            <div style="font-size:0.82rem;color:var(--gray-600);font-weight:500;"><?php echo htmlspecialchars($a['service_name'] ?? '—'); ?></div>
+                        </td>
+                        <!-- Doctor -->
+                        <td style="padding:13px 16px;">
+                            <?php if (!empty($a['doctor_name'])): ?>
+                            <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;background:linear-gradient(135deg,#2563eb,#60a5fa);color:var(--white);font-size:0.71rem;font-weight:700;white-space:nowrap;">
+                                <i class="bi bi-person-badge" style="font-size:0.68rem;"></i>
+                                <?php echo htmlspecialchars($a['doctor_name']); ?>
+                            </span>
+                            <?php else: ?>
+                            <span style="font-size:0.78rem;color:var(--gray-300);">Unassigned</span>
+                            <?php endif; ?>
+                        </td>
+                        <!-- Date & Time (merged) -->
+                        <td style="padding:13px 16px;">
+                            <div style="font-size:0.82rem;font-weight:700;color:var(--gray-700);"><?php echo date('M d, Y', strtotime($a['appointment_date'])); ?></div>
+                            <div style="font-size:0.73rem;color:var(--gray-400);margin-top:1px;"><i class="bi bi-clock" style="font-size:0.65rem;"></i> <?php echo date('h:i A', strtotime($a['appointment_time'])); ?></div>
+                        </td>
+                        <!-- Status -->
+                        <td style="padding:13px 16px;">
+                            <span style="display:inline-flex;align-items:center;gap:4px;padding:4px 11px;border-radius:20px;font-size:0.73rem;font-weight:700;background:<?php echo $sCfg['bg']; ?>;color:<?php echo $sCfg['color']; ?>;border:1.5px solid <?php echo $sCfg['border']; ?>;">
+                                <i class="bi <?php echo $sCfg['icon']; ?>" style="font-size:0.68rem;"></i>
+                                <?php echo $sCfg['label']; ?>
+                            </span>
+                        </td>
+                        <!-- Actions -->
+                        <td style="padding:13px 16px;">
+                            <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:center;">
+                                <?php if ($a['status'] === 'confirmed'): ?>
+                                <a href="<?php echo BASE_URL; ?>modules/treatments/add.php?patient_id=<?php echo $a['patient_id']; ?>&appointment_id=<?php echo $a['id']; ?>"
+                                   style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:8px;background:linear-gradient(135deg,#16a34a,#22c55e);color:var(--white);font-size:0.75rem;font-weight:700;text-decoration:none;box-shadow:0 2px 6px rgba(22,163,74,0.3);white-space:nowrap;">
+                                    <i class="bi bi-person-check-fill"></i> Check-in
+                                </a>
+                                <?php elseif ($a['status'] === 'completed'): ?>
+                                <a href="<?php echo BASE_URL; ?>modules/patients/view.php?id=<?php echo $a['patient_id']; ?>"
+                                   style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:8px;background:var(--success-bg);color:var(--success);border:1.5px solid var(--success-border);font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap;">
+                                    <i class="bi bi-clipboard2-check"></i> Record
+                                </a>
+                                <?php if (!empty($a['bill_id'])): ?>
+                                <a href="<?php echo BASE_URL; ?>modules/billing/view.php?id=<?php echo $a['bill_id']; ?>"
+                                   style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:8px;font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap;<?php echo $a['bill_status'] === 'paid' ? 'background:linear-gradient(135deg,#16a34a,#22c55e);color:var(--white);box-shadow:0 2px 6px rgba(22,163,74,0.25);' : 'background:var(--warning-bg);color:var(--warning);border:1.5px solid var(--warning-border);'; ?>">
+                                    <i class="bi bi-receipt"></i> <?php echo $a['bill_status'] === 'paid' ? 'Paid' : 'Bill'; ?>
+                                </a>
+                                <?php else: ?>
+                                <a href="<?php echo BASE_URL; ?>modules/billing/create.php?patient_id=<?php echo $a['patient_id']; ?>&appointment_id=<?php echo $a['id']; ?>"
+                                   style="display:inline-flex;align-items:center;gap:4px;padding:5px 10px;border-radius:8px;background:var(--blue-50);color:var(--primary);border:1.5px solid var(--blue-200);font-size:0.75rem;font-weight:700;text-decoration:none;white-space:nowrap;">
+                                    <i class="bi bi-receipt"></i> Create Bill
+                                </a>
+                                <?php endif; ?>
+                                <?php elseif ($a['status'] === 'pending'): ?>
+                                <button onclick="openConfirmModal(<?php echo $a['id']; ?>, '<?php echo htmlspecialchars($a['appointment_code'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($a['patient_name'], ENT_QUOTES); ?>')"
+                                   style="display:inline-flex;align-items:center;gap:4px;padding:5px 12px;border-radius:8px;background:var(--blue-50);color:var(--primary);border:1.5px solid var(--blue-200);font-size:0.75rem;font-weight:700;cursor:pointer;white-space:nowrap;">
+                                    <i class="bi bi-check-lg"></i> Confirm
+                                </button>
+                                <?php endif; ?>
+                                <!-- Print -->
+                                <a href="<?php echo BASE_URL; ?>modules/print/appointment_slip.php?id=<?php echo $a['id']; ?>" target="_blank"
+                                   style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:var(--gray-50);color:var(--gray-500);border:1.5px solid var(--gray-200);text-decoration:none;font-size:0.8rem;transition:all 0.12s;" title="Print Slip"
+                                   onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='var(--gray-50)'">
+                                    <i class="bi bi-printer"></i>
+                                </a>
+                                <!-- Edit Status -->
+                                <button onclick="updateStatus(<?php echo $a['id']; ?>, this)"
+                                   style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:var(--gray-50);color:var(--gray-500);border:1.5px solid var(--gray-200);cursor:pointer;font-size:0.8rem;transition:all 0.12s;" title="Update Status"
+                                   onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='var(--gray-50)'">
+                                    <i class="bi bi-pencil-square"></i>
+                                </button>
+                                <!-- Delete -->
+                                <button onclick="confirmDeleteAppt(<?php echo $a['id']; ?>, '<?php echo htmlspecialchars($a['appointment_code'], ENT_QUOTES); ?>')"
+                                   style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:7px;background:var(--danger-bg);color:var(--danger);border:1.5px solid var(--danger-border);cursor:pointer;font-size:0.8rem;transition:all 0.12s;" title="Delete"
+                                   onmouseover="this.style.background='#fecdd3'" onmouseout="this.style.background='#fff1f2'">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </tbody>
+            </table>
         </div>
 
         <?php if ($total_pages > 1): ?>
-        <div class="pagination-bar">
-            <div class="pagination-info">
-                Showing <?php echo number_format($offset + 1); ?>–<?php echo number_format(min($offset + $per_page, $total_count)); ?> of <?php echo number_format($total_count); ?> appointments
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-top:16px;background:var(--white);border:var(--border);border-radius:12px;padding:10px 16px;box-shadow:0 1px 4px rgba(0,0,0,0.04);">
+            <div style="font-size:0.78rem;color:var(--gray-400);font-weight:600;">
+                Showing <strong style="color:var(--gray-600);"><?php echo number_format($offset + 1); ?>–<?php echo number_format(min($offset + $per_page, $total_count)); ?></strong>
+                of <strong style="color:var(--gray-600);"><?php echo number_format($total_count); ?></strong> appointments
             </div>
-            <div class="pagination-links">
+            <div style="display:flex;gap:5px;align-items:center;">
                 <?php if ($page > 1): ?>
-                <a href="list.php?<?php echo $filter_qs; ?>page=<?php echo $page - 1; ?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i> Prev</a>
+                <a href="list.php?<?php echo $filter_qs; ?>page=<?php echo $page - 1; ?>" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:8px;border:1.5px solid var(--gray-200);background:var(--white);color:var(--gray-600);font-size:0.78rem;font-weight:600;text-decoration:none;transition:all 0.12s;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='var(--white)'">
+                    <i class="bi bi-chevron-left"></i> Prev
+                </a>
                 <?php endif; ?>
                 <?php for ($pg = max(1, $page - 2); $pg <= min($total_pages, $page + 2); $pg++): ?>
-                <a href="list.php?<?php echo $filter_qs; ?>page=<?php echo $pg; ?>"
-                   class="btn btn-sm <?php echo $pg === $page ? 'btn-primary' : 'btn-outline-secondary'; ?>"><?php echo $pg; ?></a>
+                <a href="list.php?<?php echo $filter_qs; ?>page=<?php echo $pg; ?>" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;font-size:0.82rem;font-weight:700;text-decoration:none;transition:all 0.12s;<?php echo $pg === $page ? 'background:linear-gradient(135deg,#2563eb,#60a5fa);color:var(--white);border:none;box-shadow:0 2px 8px rgba(37,99,235,0.3);' : 'border:1.5px solid var(--gray-200);background:var(--white);color:var(--gray-600);'; ?>"><?php echo $pg; ?></a>
                 <?php endfor; ?>
                 <?php if ($page < $total_pages): ?>
-                <a href="list.php?<?php echo $filter_qs; ?>page=<?php echo $page + 1; ?>" class="btn btn-sm btn-outline-secondary">Next <i class="bi bi-chevron-right"></i></a>
+                <a href="list.php?<?php echo $filter_qs; ?>page=<?php echo $page + 1; ?>" style="display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:8px;border:1.5px solid var(--gray-200);background:var(--white);color:var(--gray-600);font-size:0.78rem;font-weight:600;text-decoration:none;transition:all 0.12s;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='var(--white)'">
+                    Next <i class="bi bi-chevron-right"></i>
+                </a>
                 <?php endif; ?>
             </div>
         </div>
@@ -507,7 +570,7 @@ function doConfirmAppt() {
     </div>
 </div>
 
-<div id="walkinToast" style="display:none;position:fixed;bottom:28px;right:28px;z-index:2000;background:#fff;border:1.5px solid #bbf7d0;border-radius:12px;padding:14px 20px;box-shadow:0 8px 24px rgba(0,0,0,0.12);max-width:360px;animation:slideToast 0.3s ease;">
+<div id="walkinToast" style="display:none;position:fixed;bottom:28px;right:28px;z-index:2000;background:var(--white);border:1.5px solid var(--success-border);border-radius:12px;padding:14px 20px;box-shadow:0 8px 24px rgba(0,0,0,0.12);max-width:360px;animation:slideToast 0.3s ease;">
     <div style="font-weight:700;margin-bottom:4px;" id="walkinToastTitle"></div>
     <div style="font-size:0.85rem;color:var(--gray-600);" id="walkinToastMsg"></div>
 </div>
@@ -642,9 +705,9 @@ function loadDrawerDateData(date) {
             bar.innerHTML = '<i class="bi bi-calendar-x" style="color:#f59e0b;"></i> <strong>' + sd.reason + '</strong>';
         } else {
             var free = (sd.total_slots||0) - (sd.booked_count||0);
-            var nextPart = sd.slot ? ' · Next: <strong style="color:#2563eb;">' + sd.label + '</strong>' : '';
-            bar.innerHTML = '<i class="bi bi-calendar-check" style="color:#2563eb;"></i> '
-                + data.day_name + ' — <strong style="color:#2563eb;">' + free + ' slot' + (free!==1?'s':'') + ' free</strong>' + nextPart;
+            var nextPart = sd.slot ? ' · Next: <strong style="color:var(--primary);">' + sd.label + '</strong>' : '';
+            bar.innerHTML = '<i class="bi bi-calendar-check" style="color:var(--primary);"></i> '
+                + data.day_name + ' — <strong style="color:var(--primary);">' + free + ' slot' + (free!==1?'s':'') + ' free</strong>' + nextPart;
         }
 
         // Doctor dropdown
@@ -762,7 +825,7 @@ function submitWalkin() {
                 var editBtn    = '<button class="btn btn-sm btn-outline-secondary" title="Edit"><i class="bi bi-pencil-square"></i></button>';
                 var delBtn     = '<button class="btn btn-sm btn-outline-danger" onclick="confirmDeleteAppt(' + (appt.appt_id||'') + ', \'' + (appt.appt_code||'') + '\')" title="Delete"><i class="bi bi-trash"></i></button>';
                 var tr = document.createElement('tr');
-                tr.style.cssText = 'background:#fffbeb;transition:background 3s ease;';
+                tr.style.cssText = 'background:var(--warning-bg);transition:background 3s ease;';
         
                 tr.innerHTML =
                     '<td style="font-weight:600;color:var(--blue-500);font-size:0.8rem;">' + (appt.appt_code||'—') + '</td>' +
