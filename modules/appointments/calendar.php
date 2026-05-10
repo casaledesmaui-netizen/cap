@@ -39,7 +39,8 @@ $doctor_palette = [
     ['bg'=>'#f3e5f5','border'=>'#9c27b0','text'=>'#6a1b9a'],
 ];
 $default_color = ['bg'=>'#f0f3f4','border'=>'#5d6d7e','text'=>'#2c3e50'];
-$all_doctors_raw = $conn->query("SELECT id, full_name FROM doctors WHERE is_active = 1 ORDER BY id ASC")->fetch_all(MYSQLI_ASSOC);
+$r = $conn->query("SELECT id, full_name FROM doctors WHERE is_active = 1 ORDER BY id ASC");
+$all_doctors_raw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
 $doctor_color_map = [];
 foreach ($all_doctors_raw as $i => $dr) {
     $doctor_color_map[$dr['id']] = $doctor_palette[$i % 8];
@@ -156,9 +157,12 @@ if ($view === 'week') {
     if (!$sched) $sched = $conn->query("SELECT open_time, close_time, slot_duration_minutes FROM schedules WHERE is_open=1 LIMIT 1")->fetch_assoc();
 }
 
-$walkin_services = $conn->query("SELECT id, service_name, price FROM services WHERE is_active = 1 ORDER BY service_name")->fetch_all(MYSQLI_ASSOC);
+$r = $conn->query("SELECT id, service_name, price FROM services WHERE is_active = 1 ORDER BY service_name");
+$walkin_services = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
+
 // Needed by the drawer doctor dropdown
-$all_docs_dw = $conn->query("SELECT id, full_name, specialization, schedule_days FROM doctors WHERE is_active = 1 ORDER BY full_name ASC")->fetch_all(MYSQLI_ASSOC);
+$r = $conn->query("SELECT id, full_name, specialization, schedule_days FROM doctors WHERE is_active = 1 ORDER BY full_name ASC");
+$all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -474,8 +478,8 @@ $all_docs_dw = $conn->query("SELECT id, full_name, specialization, schedule_days
 <?php elseif ($view === 'week'): ?>
 <!-- WEEK VIEW -->
 <?php
-$wopen_h  = intval(substr($sched['open_time']  ?? '08:00', 0, 2));
-$wclose_h = intval(substr($sched['close_time'] ?? '18:00', 0, 2));
+$wopen_h  = isset($sched['open_time'])  ? intval(substr($sched['open_time'],  0, 2)) : 8;
+$wclose_h = isset($sched['close_time']) ? intval(substr($sched['close_time'], 0, 2)) : 18;
 if ($wclose_h <= $wopen_h) $wclose_h = $wopen_h + 10;
 $w_total_hours = $wclose_h - $wopen_h;
 $w_now_h = intval(date('G')); $w_now_m = intval(date('i'));
