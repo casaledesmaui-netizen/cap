@@ -1,2 +1,5 @@
+[phases.install]
+cmds = ["install-php-extensions mysqli pdo_mysql mbstring curl gd zip"]
+
 [deploy]
 startCommand = "php -S 0.0.0.0:$PORT -t . router.php"
