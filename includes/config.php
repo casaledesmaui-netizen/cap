@@ -70,7 +70,11 @@ set_exception_handler(function ($e) {
         header('Content-Type: application/json');
         echo json_encode(['status' => 'error', 'message' => 'A server error occurred.']);
     } else {
-        include dirname(__DIR__) . '/error.php';
+        if (defined('APP_DEBUG') && APP_DEBUG) {
+            echo '<pre style="background:#1e1e2e;color:#f38ba8;padding:20px;">';
+            echo htmlspecialchars($e->getMessage() . "\nFile: " . $e->getFile() . ':' . $e->getLine() . "\n\n" . $e->getTraceAsString());
+            echo '</pre>';
+        } else { include dirname(__DIR__) . '/error.php'; }
     }
     exit();
 });
