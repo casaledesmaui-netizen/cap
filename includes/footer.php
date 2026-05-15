@@ -1,7 +1,7 @@
 <?php
 // footer.php — Closing scripts included at the bottom of every admin page.
 ?>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="<?php echo BASE_URL; ?>assets/js/bootstrap.bundle.min.js"></script>
 <script src="<?php echo BASE_URL; ?>assets/js/app.js"></script>
 
 <!-- Global phone input sync script (used by phone_input.php component) -->
