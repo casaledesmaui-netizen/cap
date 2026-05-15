@@ -64,7 +64,8 @@ function generate_captcha() {
     $_SESSION['captcha_n2']     = $n2;
 }
 
-if (!isset($_SESSION['captcha_answer'])) 
+if (!isset($_SESSION['captcha_answer']) || $_SERVER['REQUEST_METHOD'] === 'GET') {
+    generate_captcha();
 {
 
 $view  = $_GET['view'] ?? 'login';
