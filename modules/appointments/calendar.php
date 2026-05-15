@@ -1,5 +1,3 @@
-php
-
 <?php
 require_once '../../includes/config.php';
 require_once '../../includes/db.php';
@@ -41,33 +39,29 @@ $doctor_palette = [
     ['bg'=>'#f3e5f5','border'=>'#9c27b0','text'=>'#6a1b9a'],
 ];
 $default_color = ['bg'=>'#f0f3f4','border'=>'#5d6d7e','text'=>'#2c3e50'];
-
-// ── SAFE: all queries checked before fetch ────────────────────────────────
-$r = $conn->query("SELECT id, full_name FROM doctors WHERE is_active = 1 ORDER BY id ASC");
-$all_doctors_raw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
+$all_doctors_raw = $conn->query("SELECT id, full_name FROM doctors WHERE is_active = 1 ORDER BY id ASC")->fetch_all(MYSQLI_ASSOC);
 $doctor_color_map = [];
 foreach ($all_doctors_raw as $i => $dr) {
     $doctor_color_map[$dr['id']] = $doctor_palette[$i % 8];
 }
 
-$status_dot    = ['pending'=>'#f39c12','confirmed'=>'#2980b9','completed'=>'#27ae60','cancelled'=>'#e74c3c','no-show'=>'#95a5a6'];
+$status_dot = ['pending'=>'#f39c12','confirmed'=>'#2980b9','completed'=>'#27ae60','cancelled'=>'#e74c3c','no-show'=>'#95a5a6'];
 $status_labels = ['pending'=>'Pending','confirmed'=>'Confirmed','completed'=>'Completed','cancelled'=>'Cancelled','no-show'=>'No-Show'];
 
-// Initialize all variables
+// Initialize variables used conditionally (prevents "undefined variable" warnings)
 $first_day_of_week = 0;
-$days_in_month     = 0;
-$appts_by_date     = [];
-$blocked_by_date   = [];
-$day_label = $prev_day = $next_day = '';
-$day_appts  = [];
-$sched      = null;
-$week_appts_by_day = [];
-$week_start = $week_end = $week_label = $prev_week = $next_week = $today;
-$week_days  = [];
+$days_in_month = 0;
+$appts_by_date = [];
+$blocked_by_date = [];
+$day_label = '';
+$prev_day = '';
+$next_day = '';
+$day_appts = [];
+$sched = null;
 
-// ── Month view data ───────────────────────────────────────────────────────
+// Month view data
 if ($view === 'month') {
-    $r = $conn->query("
+    $appts_raw = $conn->query("
         SELECT a.id, a.appointment_code, a.appointment_date, a.appointment_time,
                a.status, a.patient_id, a.notes,
                CONCAT(p.first_name,' ',p.last_name) as patient_name,
@@ -82,21 +76,20 @@ if ($view === 'month') {
         LEFT JOIN bills    b ON b.appointment_id = a.id
         WHERE a.appointment_date BETWEEN '$month_start' AND '$month_end'
         ORDER BY a.appointment_time ASC
-    ");
-    $appts_raw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
+    ")->fetch_all(MYSQLI_ASSOC);
 
-    $r2 = $conn->query("SELECT blocked_date, reason FROM blocked_dates WHERE blocked_date BETWEEN '$month_start' AND '$month_end'");
-    $blocked_raw = $r2 ? $r2->fetch_all(MYSQLI_ASSOC) : [];
-
-    foreach ($appts_raw as $a)  { $appts_by_date[$a['appointment_date']][] = $a; }
+    $blocked_raw = $conn->query("SELECT blocked_date, reason FROM blocked_dates WHERE blocked_date BETWEEN '$month_start' AND '$month_end'")->fetch_all(MYSQLI_ASSOC);
+    $appts_by_date = [];
+    foreach ($appts_raw as $a) { $appts_by_date[$a['appointment_date']][] = $a; }
+    $blocked_by_date = [];
     foreach ($blocked_raw as $b) { $blocked_by_date[$b['blocked_date']] = $b['reason']; }
     $first_day_of_week = intval(date('w', strtotime($month_start)));
     $days_in_month     = intval(date('t', strtotime($month_start)));
 }
 
-// ── Day view data ─────────────────────────────────────────────────────────
+// Day view data
 if ($view === 'day') {
-    $r = $conn->query("
+    $day_appts = $conn->query("
         SELECT a.id, a.appointment_code, a.appointment_date, a.appointment_time,
                a.status, a.patient_id, a.notes,
                CONCAT(p.first_name,' ',p.last_name) as patient_name,
@@ -111,33 +104,36 @@ if ($view === 'day') {
         LEFT JOIN bills    b ON b.appointment_id = a.id
         WHERE a.appointment_date = '$day_date' AND a.status NOT IN ('cancelled')
         ORDER BY a.appointment_time ASC
-    ");
-    $day_appts = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
+    ")->fetch_all(MYSQLI_ASSOC);
 
     $day_name = strtolower(date('l', strtotime($day_date)));
-    $r2 = $conn->query("SELECT open_time, close_time, slot_duration_minutes FROM schedules WHERE day_of_week = '$day_name' AND is_open = 1 LIMIT 1");
-    $sched = ($r2 && $r2->num_rows > 0) ? $r2->fetch_assoc() : null;
-
+    $sched = $conn->query("SELECT open_time, close_time, slot_duration_minutes FROM schedules WHERE day_of_week = '$day_name' AND is_open = 1 LIMIT 1")->fetch_assoc();
     $day_label = date('l, F j, Y', strtotime($day_date));
     $prev_day  = date('Y-m-d', strtotime($day_date . ' -1 day'));
     $next_day  = date('Y-m-d', strtotime($day_date . ' +1 day'));
 }
 
-// ── Week view data ────────────────────────────────────────────────────────
+// Week view data
+$week_appts_by_day = [];
+$week_start = $today;
+$week_end   = $today;
+$week_days  = [];
+$week_label = '';
+$prev_week  = $today;
+$next_week  = $today;
 if ($view === 'week') {
     $ref_date = $_GET['date'] ?? $today;
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $ref_date)) $ref_date = $today;
-    $dow        = date('N', strtotime($ref_date));
+    $dow        = date('N', strtotime($ref_date)); // 1=Mon 7=Sun
     $week_start = date('Y-m-d', strtotime($ref_date . ' -' . ($dow - 1) . ' days'));
-    $week_end   = date('Y-m-d', strtotime($week_start . ' +5 days'));
+    $week_end   = date('Y-m-d', strtotime($week_start . ' +5 days')); // Mon–Sat
     $prev_week  = date('Y-m-d', strtotime($week_start . ' -7 days'));
     $next_week  = date('Y-m-d', strtotime($week_start . ' +7 days'));
     $week_label = date('M d', strtotime($week_start)) . ' – ' . date('M d, Y', strtotime($week_end));
     for ($i = 0; $i < 6; $i++) {
         $week_days[] = date('Y-m-d', strtotime($week_start . " +$i days"));
     }
-
-    $r = $conn->query("
+    $week_appts_raw = $conn->query("
         SELECT a.id, a.appointment_code, a.appointment_date, a.appointment_time,
                a.status, a.patient_id, a.notes,
                CONCAT(p.first_name,' ',p.last_name) as patient_name,
@@ -153,84 +149,219 @@ if ($view === 'week') {
         WHERE a.appointment_date BETWEEN '$week_start' AND '$week_end'
         AND a.status NOT IN ('cancelled')
         ORDER BY a.appointment_time ASC
-    ");
-    $week_appts_raw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
-
+    ")->fetch_all(MYSQLI_ASSOC);
     foreach ($week_days as $wd) $week_appts_by_day[$wd] = [];
     foreach ($week_appts_raw as $a) $week_appts_by_day[$a['appointment_date']][] = $a;
-
-    if (!$sched) {
-        $r2 = $conn->query("SELECT open_time, close_time, slot_duration_minutes FROM schedules WHERE is_open=1 LIMIT 1");
-        $sched = ($r2 && $r2->num_rows > 0) ? $r2->fetch_assoc() : null;
-    }
+    // Use first open schedule for hour range
+    if (!$sched) $sched = $conn->query("SELECT open_time, close_time, slot_duration_minutes FROM schedules WHERE is_open=1 LIMIT 1")->fetch_assoc();
 }
 
-// ── Always-needed queries ─────────────────────────────────────────────────
-$r = $conn->query("SELECT id, service_name, price FROM services WHERE is_active = 1 ORDER BY service_name");
-$walkin_services = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
-
-$r = $conn->query("SELECT id, full_name, specialization, schedule_days FROM doctors WHERE is_active = 1 ORDER BY full_name ASC");
-$all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
+$walkin_services = $conn->query("SELECT id, service_name, price FROM services WHERE is_active = 1 ORDER BY service_name")->fetch_all(MYSQLI_ASSOC);
+// Needed by the drawer doctor dropdown
+$all_docs_dw = $conn->query("SELECT id, full_name, specialization, schedule_days FROM doctors WHERE is_active = 1 ORDER BY full_name ASC")->fetch_all(MYSQLI_ASSOC);
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head><?php include '../../includes/head.php'; ?>
 <style>
+/* ── View Toggle ─────────────────────────────────────────── */
 .view-toggle{display:flex;background:var(--gray-100);border-radius:10px;padding:3px;gap:2px;}
 .view-toggle a{padding:6px 16px;font-size:0.8rem;font-weight:600;text-decoration:none;color:var(--gray-500);border-radius:8px;transition:all 0.18s;}
 .view-toggle a.active{background:var(--white);color:#2563eb;box-shadow:0 1px 6px rgba(37,99,235,0.12);}
 .view-toggle a:hover:not(.active){background:var(--gray-50);color:var(--gray-700);}
-.calendar-wrap{border-radius:16px;overflow:hidden;border:none;box-shadow:var(--shadow-md);}
+
+/* ── Calendar Wrap ───────────────────────────────────────── */
+.calendar-wrap{
+  border-radius:16px;
+  overflow:hidden;
+  border:none;
+  box-shadow:var(--shadow-md);
+}
+
+/* ── Day-of-week header ──────────────────────────────────── */
 .cal-header-row{display:grid;grid-template-columns:repeat(7,1fr);}
-.cal-dow{padding:12px 0;text-align:center;font-size:0.72rem;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:var(--gray-400);background:linear-gradient(to bottom,var(--gray-50),var(--gray-100));border-bottom:1px solid var(--gray-200);}
-.cal-dow:first-child{color:#e11d48;}
-.cal-dow:last-child{color:#e11d48;}
+.cal-dow{
+  padding:12px 0;
+  text-align:center;
+  font-size:0.72rem;
+  font-weight:800;
+  text-transform:uppercase;
+  letter-spacing:0.08em;
+  color:var(--gray-400);
+  background:linear-gradient(to bottom,var(--gray-50),var(--gray-100));
+  border-bottom:1px solid var(--gray-200);
+}
+.cal-dow:first-child{color:#e11d48;} /* Sunday */
+.cal-dow:last-child{color:#e11d48;}  /* Saturday */
+
+/* ── Calendar Grid ───────────────────────────────────────── */
 .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);}
-.cal-cell{min-height:130px;padding:8px 9px 6px;border-right:1px solid var(--gray-100);border-bottom:1px solid var(--gray-100);background:var(--white);transition:background 0.15s;position:relative;}
+.cal-cell{
+  min-height:130px;
+  padding:8px 9px 6px;
+  border-right:1px solid var(--gray-100);
+  border-bottom:1px solid var(--gray-100);
+  background:var(--white);
+  transition:background 0.15s;
+  position:relative;
+}
 .cal-cell:nth-child(7n){border-right:none;}
-.cal-cell:nth-child(7n+1) .day-num,.cal-cell:nth-child(7n) .day-num{color:#e11d48;}
+.cal-cell:nth-child(7n+1) .day-num,
+.cal-cell:nth-child(7n) .day-num{color:#e11d48;} /* Sun/Sat in red */
+
 .cal-cell.empty{background:var(--gray-50);opacity:0.6;}
 .cal-cell.today{background:linear-gradient(135deg,var(--blue-50),var(--blue-100))!important;}
-.cal-cell.today::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#2563eb,#60a5fa);}
+.cal-cell.today::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,#2563eb,#60a5fa);border-radius:0;
+}
 .cal-cell.blocked{background:var(--danger-bg);}
 .cal-cell.has-appts{cursor:pointer;}
 .cal-cell.has-appts:hover{background:var(--blue-50);}
-.day-num{font-size:0.78rem;font-weight:700;color:var(--gray-600);margin-bottom:6px;display:flex;align-items:center;gap:4px;}
-.today-dot{width:24px;height:24px;background:linear-gradient(135deg,#2563eb,#3b82f6);border-radius:50%;color:var(--white);font-size:0.68rem;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(37,99,235,0.35);}
-.appt-chip{display:flex;align-items:center;gap:4px;margin-bottom:3px;border-radius:6px;padding:3px 7px;font-size:0.69rem;font-weight:600;cursor:pointer;border-left:3px solid;transition:transform 0.1s,box-shadow 0.1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;box-shadow:0 1px 3px rgba(0,0,0,0.06);}
-.appt-chip:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,0.12);}
+
+/* ── Day Number ──────────────────────────────────────────── */
+.day-num{
+  font-size:0.78rem;font-weight:700;color:var(--gray-600);
+  margin-bottom:6px;display:flex;align-items:center;gap:4px;
+}
+.today-dot{
+  width:24px;height:24px;
+  background:linear-gradient(135deg,#2563eb,#3b82f6);
+  border-radius:50%;color:var(--white);font-size:0.68rem;font-weight:800;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 6px rgba(37,99,235,0.35);
+}
+
+/* ── Appointment Chips ───────────────────────────────────── */
+.appt-chip{
+  display:flex;align-items:center;gap:4px;
+  margin-bottom:3px;
+  border-radius:6px;
+  padding:3px 7px;
+  font-size:0.69rem;font-weight:600;
+  cursor:pointer;
+  border-left:3px solid;
+  transition:transform 0.1s, box-shadow 0.1s;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:100%;
+  box-shadow:0 1px 3px rgba(0,0,0,0.06);
+}
+.appt-chip:hover{
+  transform:translateY(-1px);
+  box-shadow:0 3px 8px rgba(0,0,0,0.12);
+}
 .status-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;}
 .chip-time{font-size:0.6rem;opacity:0.7;flex-shrink:0;font-weight:700;}
-.more-pill{font-size:0.67rem;color:#2563eb;font-weight:700;cursor:pointer;margin-top:3px;display:inline-flex;align-items:center;gap:2px;background:#eff6ff;border-radius:20px;padding:1px 8px;border:1px solid #bfdbfe;}
+.more-pill{
+  font-size:0.67rem;color:#2563eb;font-weight:700;
+  cursor:pointer;margin-top:3px;display:inline-flex;align-items:center;gap:2px;
+  background:#eff6ff;border-radius:20px;padding:1px 8px;border:1px solid #bfdbfe;
+}
 .more-pill:hover{background:#dbeafe;}
-.blocked-tag{font-size:0.67rem;color:#dc2626;background:#fee2e2;border-radius:20px;padding:1px 8px;display:inline-flex;align-items:center;gap:3px;border:1px solid #fecaca;font-weight:600;}
+.blocked-tag{
+  font-size:0.67rem;color:#dc2626;
+  background:#fee2e2;border-radius:20px;
+  padding:1px 8px;display:inline-flex;align-items:center;gap:3px;
+  border:1px solid #fecaca;font-weight:600;
+}
+
+/* ── Legend Pills ────────────────────────────────────────── */
 .svc-legend{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;}
-.svc-pill{font-size:0.7rem;padding:3px 10px;border-radius:20px;font-weight:600;border-left:3px solid;box-shadow:var(--shadow-sm);}
-.cal-nav-bar{display:flex;align-items:center;gap:10px;margin-bottom:14px;background:var(--white);border:1px solid var(--gray-200);border-radius:12px;padding:8px 14px;box-shadow:var(--shadow-sm);}
-.cal-nav-btn{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:8px;border:var(--border);background:var(--white);color:var(--gray-600);text-decoration:none;font-size:0.85rem;transition:all 0.15s;}
+.svc-pill{
+  font-size:0.7rem;padding:3px 10px;border-radius:20px;
+  font-weight:600;border-left:3px solid;
+  box-shadow:var(--shadow-sm);
+}
+
+/* ── Nav Bar ─────────────────────────────────────────────── */
+.cal-nav-bar{
+  display:flex;align-items:center;gap:10px;margin-bottom:14px;
+  background:var(--white);border:1px solid var(--gray-200);border-radius:12px;
+  padding:8px 14px;box-shadow:var(--shadow-sm);
+}
+.cal-nav-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:32px;height:32px;border-radius:8px;
+  border:var(--border);background:var(--white);
+  color:var(--gray-600);text-decoration:none;font-size:0.85rem;
+  transition:all 0.15s;
+}
 .cal-nav-btn:hover{background:var(--gray-100);border-color:var(--gray-300);color:var(--gray-900);}
-.cal-nav-label{font-size:0.95rem;font-weight:700;color:var(--gray-900);min-width:140px;text-align:center;}
-.cal-today-btn{padding:4px 14px;border-radius:8px;font-size:0.78rem;font-weight:700;background:linear-gradient(135deg,#2563eb,#3b82f6);color:var(--white);border:none;text-decoration:none;cursor:pointer;box-shadow:0 2px 6px rgba(37,99,235,0.3);transition:all 0.15s;}
+.cal-nav-label{
+  font-size:0.95rem;font-weight:700;color:var(--gray-900);
+  min-width:140px;text-align:center;
+}
+.cal-today-btn{
+  padding:4px 14px;border-radius:8px;font-size:0.78rem;font-weight:700;
+  background:linear-gradient(135deg,#2563eb,#3b82f6);color:var(--white);
+  border:none;text-decoration:none;cursor:pointer;
+  box-shadow:0 2px 6px rgba(37,99,235,0.3);transition:all 0.15s;
+}
 .cal-today-btn:hover{box-shadow:0 4px 10px rgba(37,99,235,0.4);color:var(--white);}
-.day-view-wrap{display:grid;grid-template-columns:64px 1fr;border:none;border-radius:16px;overflow:hidden;background:var(--white);box-shadow:var(--shadow-md);}
+
+/* ── Day View ────────────────────────────────────────────── */
+.day-view-wrap{
+  display:grid;grid-template-columns:64px 1fr;
+  border:none;border-radius:16px;overflow:hidden;background:var(--white);
+  box-shadow:var(--shadow-md);
+}
 .day-time-gutter{background:var(--gray-50);border-right:1px solid var(--gray-200);}
-.day-time-slot{height:60px;display:flex;align-items:flex-start;justify-content:flex-end;padding:4px 10px 0 0;font-size:0.63rem;color:var(--gray-400);font-weight:700;border-bottom:1px solid var(--gray-100);letter-spacing:0.02em;}
-.day-appt-block{position:absolute;left:8px;right:8px;border-radius:10px;padding:7px 10px;border-left:4px solid;cursor:pointer;overflow:hidden;transition:transform 0.12s,box-shadow 0.12s;box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:2;}
+.day-time-slot{
+  height:60px;display:flex;align-items:flex-start;
+  justify-content:flex-end;padding:4px 10px 0 0;
+  font-size:0.63rem;color:var(--gray-400);font-weight:700;
+  border-bottom:1px solid var(--gray-100);letter-spacing:0.02em;
+}
+.day-appt-block{
+  position:absolute;left:8px;right:8px;
+  border-radius:10px;padding:7px 10px;border-left:4px solid;
+  cursor:pointer;overflow:hidden;
+  transition:transform 0.12s, box-shadow 0.12s;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);z-index:2;
+}
 .day-appt-block:hover{transform:translateY(-1px) scale(1.005);box-shadow:0 6px 18px rgba(0,0,0,0.14);z-index:3;}
 .day-appt-title{font-size:0.79rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .day-appt-sub{font-size:0.68rem;opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 .day-appt-time{font-size:0.62rem;opacity:0.65;margin-top:2px;}
-.allergy-badge{display:inline-flex;align-items:center;gap:3px;font-size:0.6rem;font-weight:800;background:#fee2e2;color:#dc2626;border-radius:4px;padding:1px 6px;margin-top:2px;}
+.allergy-badge{
+  display:inline-flex;align-items:center;gap:3px;
+  font-size:0.6rem;font-weight:800;
+  background:#fee2e2;color:#dc2626;
+  border-radius:4px;padding:1px 6px;margin-top:2px;
+}
 .day-now-line{position:absolute;left:0;right:0;height:2px;background:#ef4444;z-index:10;pointer-events:none;}
-.day-now-line::before{content:'';position:absolute;left:-6px;top:-5px;width:12px;height:12px;border-radius:50%;background:#ef4444;box-shadow:0 0 6px rgba(239,68,68,0.5);}
-.allergy-alert{display:flex;align-items:center;gap:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;padding:10px 14px;margin:14px 0 0;font-size:0.8rem;color:#dc2626;font-weight:600;}
-.modal-info-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-bottom:1px solid var(--gray-100);font-size:0.83rem;}
+.day-now-line::before{
+  content:'';position:absolute;left:-6px;top:-5px;
+  width:12px;height:12px;border-radius:50%;background:#ef4444;
+  box-shadow:0 0 6px rgba(239,68,68,0.5);
+}
+
+/* ── Appointment Modal ───────────────────────────────────── */
+.allergy-alert{
+  display:flex;align-items:center;gap:8px;
+  background:#fef2f2;border:1px solid #fecaca;border-radius:10px;
+  padding:10px 14px;margin:14px 0 0;
+  font-size:0.8rem;color:#dc2626;font-weight:600;
+}
+.modal-info-row{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 0;border-bottom:1px solid var(--gray-100);font-size:0.83rem;
+}
 .modal-info-row:last-child{border-bottom:none;}
 .balance-pill{display:inline-flex;align-items:center;gap:5px;padding:3px 11px;border-radius:20px;font-size:0.78rem;font-weight:700;}
-.status-btn{padding:5px 14px;border-radius:20px;border:2px solid;font-size:0.75rem;font-weight:700;cursor:pointer;transition:all 0.15s;background:transparent;}
+.status-btn{
+  padding:5px 14px;border-radius:20px;border:2px solid;
+  font-size:0.75rem;font-weight:700;cursor:pointer;
+  transition:all 0.15s;background:transparent;
+}
 .status-btn.active{color:#fff!important;}
 .status-btn:hover:not(.active){opacity:0.75;transform:translateY(-1px);}
-.day-modal-appt{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;margin-bottom:8px;border-left:4px solid;transition:transform 0.12s;}
+.day-modal-appt{
+  display:flex;align-items:center;gap:10px;
+  padding:11px 14px;border-radius:10px;
+  margin-bottom:8px;border-left:4px solid;
+  transition:transform 0.12s;
+}
 .day-modal-appt:hover{transform:translateX(2px);}
 </style>
 </head>
@@ -240,7 +371,6 @@ $all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
 <?php include '../../includes/header.php'; ?>
 <div class="page-content">
 
-<!-- ── Top header bar ──────────────────────────────────────────────────── -->
 <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px;background:var(--white);border:1px solid var(--gray-200);border-radius:14px;padding:10px 16px;box-shadow:var(--shadow-sm);">
     <div style="display:flex;align-items:center;gap:8px;">
         <div style="width:36px;height:36px;background:linear-gradient(135deg,#2563eb,#60a5fa);border-radius:10px;display:flex;align-items:center;justify-content:center;">
@@ -254,25 +384,27 @@ $all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
     <div class="view-toggle" style="margin-left:10px;">
         <a href="calendar.php?view=month&month=<?php echo $month; ?>&year=<?php echo $year; ?>" class="<?php echo $view==='month'?'active':''; ?>"><i class="bi bi-calendar3"></i> Month</a>
         <?php
-        if ($view === 'week')    $ctx = $week_start;
-        elseif ($view === 'day') $ctx = $day_date;
-        else                     $ctx = $month_start;
+            // BUG FIX: Use the currently viewed date as context when switching views,
+            // instead of always falling back to $today.
+            if ($view === 'week')       $ctx = $week_start;
+            elseif ($view === 'day')    $ctx = $day_date;
+            else                        $ctx = $month_start; // month view → first day of viewed month
         ?>
         <a href="calendar.php?view=week&date=<?php echo $ctx; ?>" class="<?php echo $view==='week'?'active':''; ?>"><i class="bi bi-calendar-week"></i> Week</a>
         <a href="calendar.php?view=day&date=<?php echo $ctx; ?>" class="<?php echo $view==='day'?'active':''; ?>"><i class="bi bi-calendar-day"></i> Day</a>
     </div>
     <div style="margin-left:auto;display:flex;gap:8px;align-items:center;">
-        <button onclick="openWalkinDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:10px;background:linear-gradient(135deg,#16a34a,#22c55e);color:var(--white);border:none;font-size:0.82rem;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(22,163,74,0.3);transition:all 0.15s;">
+        <button onclick="openWalkinDrawer()" style="display:inline-flex;align-items:center;gap:6px;padding:7px 16px;border-radius:10px;background:linear-gradient(135deg,#16a34a,#22c55e);color:var(--white);border:none;font-size:0.82rem;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(22,163,74,0.3);transition:all 0.15s;" onmouseover="this.style.boxShadow='0 4px 14px rgba(22,163,74,0.45)'" onmouseout="this.style.boxShadow='0 2px 8px rgba(22,163,74,0.3)'">
             <i class="bi bi-plus-circle-fill"></i> New Appointment
         </button>
-        <a href="list.php" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:10px;background:var(--gray-50);color:var(--gray-600);border:1px solid var(--gray-200);font-size:0.82rem;font-weight:600;text-decoration:none;">
+        <a href="list.php" style="display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:10px;background:var(--gray-50);color:var(--gray-600);border:1px solid var(--gray-200);font-size:0.82rem;font-weight:600;text-decoration:none;transition:all 0.15s;" onmouseover="this.style.background='var(--gray-100)'" onmouseout="this.style.background='var(--gray-50)'">
             <i class="bi bi-list-ul"></i> List View
         </a>
     </div>
 </div>
 
 <?php if ($view === 'month'): ?>
-<!-- ══ MONTH VIEW ══════════════════════════════════════════════════════════ -->
+<!-- MONTH VIEW -->
 <div class="cal-nav-bar">
     <a href="calendar.php?view=month&month=<?php echo $prev_month; ?>&year=<?php echo $prev_year; ?>" class="cal-nav-btn"><i class="bi bi-chevron-left"></i></a>
     <span class="cal-nav-label"><?php echo $month_label; ?></span>
@@ -283,7 +415,6 @@ $all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
         <?php echo $total_this_month; ?> appointment<?php echo $total_this_month !== 1 ? 's' : ''; ?> this month
     </span>
 </div>
-
 <?php if (!empty($all_doctors_raw)): ?>
 <div class="svc-legend">
 <?php foreach ($all_doctors_raw as $dr): $c=$doctor_color_map[$dr['id']]??$default_color; ?>
@@ -293,17 +424,15 @@ $all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
 <span class="svc-pill" style="background:#fff5f5;border-color:#e74c3c;color:#c0392b;">Blocked</span>
 </div>
 <?php endif; ?>
-
 <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:0.74rem;margin-bottom:14px;background:var(--gray-50);border:1px solid var(--gray-200);border-radius:10px;padding:8px 14px;">
 <span style="font-size:0.7rem;font-weight:700;color:var(--gray-400);text-transform:uppercase;letter-spacing:0.05em;align-self:center;margin-right:4px;">Status:</span>
 <?php foreach ($status_dot as $s=>$color): ?>
 <span style="display:flex;align-items:center;gap:5px;font-weight:600;color:var(--gray-600);">
-    <span style="width:9px;height:9px;border-radius:50%;background:<?php echo $color;?>;display:inline-block;"></span>
+    <span style="width:9px;height:9px;border-radius:50%;background:<?php echo $color;?>;display:inline-block;box-shadow:0 0 0 2px <?php echo $color;?>33;"></span>
     <?php echo ucfirst($s);?>
 </span>
 <?php endforeach; ?>
 </div>
-
 <div class="calendar-wrap">
     <div class="cal-header-row"><?php foreach(['Sun','Mon','Tue','Wed','Thu','Fri','Sat'] as $dow): ?><div class="cal-dow"><?php echo $dow;?></div><?php endforeach;?></div>
     <div class="cal-grid">
@@ -317,8 +446,8 @@ $all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
         $dam=$appts_by_date[$ds]??[]; $ha=!empty($dam)||$ib;
         $cc=implode(' ',array_filter(['cal-cell',$it?'today':'',$ib?'blocked':'',$ha?'has-appts':'']));
     ?>
-    <div class="<?php echo $cc;?>" onclick="<?php echo $ha?"viewDay('$ds')":"goToDay('$ds')";?>">
-        <div class="day-num">
+    <div class="<?php echo $cc;?>" onclick="<?php echo $ha?"viewDay('$ds')" : "goToDay('$ds')";?>">
+        <div class="day-num <?php echo $it?'is-today':'';?>">
             <?php if($it): ?><span class="today-dot"><?php echo $d;?></span><?php else: ?><?php echo $d;?><?php endif;?>
         </div>
         <?php if($ib): ?><span class="blocked-tag">🚫 Closed</span><?php endif;?>
@@ -343,13 +472,14 @@ $all_docs_dw = $r ? $r->fetch_all(MYSQLI_ASSOC) : [];
 </div>
 
 <?php elseif ($view === 'week'): ?>
-<!-- ══ WEEK VIEW ═══════════════════════════════════════════════════════════ -->
+<!-- WEEK VIEW -->
 <?php
-$wopen_h  = isset($sched['open_time'])  ? intval(substr($sched['open_time'],  0, 2)) : 8;
-$wclose_h = isset($sched['close_time']) ? intval(substr($sched['close_time'], 0, 2)) : 18;
+$wopen_h  = intval(substr($sched['open_time']  ?? '08:00', 0, 2));
+$wclose_h = intval(substr($sched['close_time'] ?? '18:00', 0, 2));
 if ($wclose_h <= $wopen_h) $wclose_h = $wopen_h + 10;
 $w_total_hours = $wclose_h - $wopen_h;
 $w_now_h = intval(date('G')); $w_now_m = intval(date('i'));
+$w_now_top = (($w_now_h - $wopen_h) * 60 + $w_now_m);
 ?>
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
     <a href="calendar.php?view=week&date=<?php echo $prev_week;?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i></a>
@@ -359,6 +489,7 @@ $w_now_h = intval(date('G')); $w_now_m = intval(date('i'));
     <?php $total_week_appts = array_sum(array_map('count', $week_appts_by_day)); ?>
     <span style="font-size:0.8rem;color:var(--gray-500);"><?php echo $total_week_appts;?> appointment<?php echo $total_week_appts!==1?'s':'';?> this week</span>
 </div>
+
 <?php if(!empty($all_doctors_raw)): ?>
 <div class="svc-legend">
 <?php foreach($all_doctors_raw as $dr): $c=$doctor_color_map[$dr['id']]??$default_color; ?>
@@ -367,44 +498,75 @@ $w_now_h = intval(date('G')); $w_now_m = intval(date('i'));
 </div>
 <?php endif;?>
 
+<!-- Week grid -->
 <div style="display:grid;grid-template-columns:52px repeat(6,1fr);border:1px solid var(--gray-200);border-radius:12px;overflow:hidden;background:var(--white);">
+
+    <!-- Header row: day labels -->
     <div style="background:var(--gray-50);border-right:1px solid var(--gray-100);border-bottom:1px solid var(--gray-200);"></div>
     <?php foreach($week_days as $i => $wd):
-        $is_today_col   = ($wd === $today);
+        $is_today_col = ($wd === $today);
         $day_appt_count = count($week_appts_by_day[$wd]);
-        $col_border     = $i < 5 ? 'border-right:1px solid var(--gray-100);' : '';
+        $col_border = $i < 5 ? 'border-right:1px solid var(--gray-100);' : '';
     ?>
     <div style="<?php echo $col_border;?>border-bottom:1px solid var(--gray-200);padding:8px 6px;background:<?php echo $is_today_col?'var(--blue-50)':'var(--gray-50)';?>;text-align:center;">
-        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:<?php echo $is_today_col?'var(--blue-600)':'var(--gray-500)';?>;"><?php echo date('D',strtotime($wd));?></div>
-        <div style="font-size:<?php echo $is_today_col?'1rem':'0.9rem';?>;font-weight:700;<?php if($is_today_col): ?>background:#2563eb;color:#fff;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:3px auto 0;<?php else: ?>color:var(--gray-700);margin-top:3px;<?php endif;?>"><?php echo date('j',strtotime($wd));?></div>
-        <?php if($day_appt_count > 0): ?><div style="font-size:0.62rem;color:var(--blue-500);margin-top:2px;font-weight:600;"><?php echo $day_appt_count;?> appt<?php echo $day_appt_count!==1?'s':'';?></div><?php endif;?>
+        <div style="font-size:0.68rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:<?php echo $is_today_col?'var(--blue-600)':'var(--gray-500)';?>;">
+            <?php echo date('D', strtotime($wd));?>
+        </div>
+        <div style="font-size:<?php echo $is_today_col?'1rem':'0.9rem';?>;font-weight:700;color:<?php echo $is_today_col?'var(--white)':'var(--gray-700)';?>;
+            <?php if($is_today_col): ?>background:#2563eb;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:3px auto 0;<?php else: ?>margin-top:3px;<?php endif;?>">
+            <?php echo date('j', strtotime($wd));?>
+        </div>
+        <?php if($day_appt_count > 0): ?>
+        <div style="font-size:0.62rem;color:var(--blue-500);margin-top:2px;font-weight:600;"><?php echo $day_appt_count;?> appt<?php echo $day_appt_count!==1?'s':'';?></div>
+        <?php endif;?>
     </div>
     <?php endforeach;?>
+
+    <!-- Time gutter + columns -->
     <div style="display:contents;">
     <?php for($h = $wopen_h; $h <= $wclose_h; $h++): ?>
-        <div style="background:var(--gray-50);border-right:1px solid var(--gray-100);border-bottom:1px dashed var(--gray-100);height:60px;display:flex;align-items:flex-start;justify-content:flex-end;padding:4px 6px 0 0;font-size:0.62rem;color:var(--gray-400);font-weight:600;"><?php echo date('g A',strtotime("$h:00"));?></div>
+        <!-- Time label -->
+        <div style="background:var(--gray-50);border-right:1px solid var(--gray-100);border-bottom:1px dashed var(--gray-100);height:60px;display:flex;align-items:flex-start;justify-content:flex-end;padding:4px 6px 0 0;font-size:0.62rem;color:var(--gray-400);font-weight:600;">
+            <?php echo date('g A', strtotime("$h:00"));?>
+        </div>
+        <!-- Day columns for this hour -->
         <?php foreach($week_days as $ci => $wd):
-            $col_border   = $ci < 5 ? 'border-right:1px solid var(--gray-100);' : '';
+            $col_border = $ci < 5 ? 'border-right:1px solid var(--gray-100);' : '';
             $is_today_col = ($wd === $today);
         ?>
         <div style="<?php echo $col_border;?>border-bottom:1px dashed var(--gray-100);height:60px;position:relative;background:<?php echo $is_today_col?'rgba(219,234,254,0.15)':'transparent';?>;">
-            <?php if($is_today_col && $h === $w_now_h): ?>
-            <div style="position:absolute;left:0;right:0;top:<?php echo $w_now_m;?>px;height:2px;background:#ef4444;z-index:10;pointer-events:none;"><div style="position:absolute;left:-4px;top:-4px;width:10px;height:10px;border-radius:50%;background:#ef4444;"></div></div>
-            <?php endif;?>
-            <?php foreach($week_appts_by_day[$wd] as $a):
-                $ah = intval(substr($a['appointment_time'],0,2));
-                if($ah !== $h) continue;
-                $am  = intval(substr($a['appointment_time'],3,2));
-                $dur = max(25,intval($a['duration_minutes']??30));
-                $c   = isset($a['doctor_id'])&&$a['doctor_id']?($doctor_color_map[$a['doctor_id']]??$default_color):$default_color;
-                $dot = $status_dot[$a['status']]??'#95a5a6';
-                $np  = explode(' ',ucwords(strtolower($a['patient_name']??'')));
-                $sn  = $np[0].(isset($np[1])?' '.substr($np[1],0,1).'.':'');
-                $ts  = date('h:i A',strtotime($a['appointment_time']));
+            <?php
+            // Now line (only on today's column, at the right hour)
+            if ($is_today_col && $h === $w_now_h && in_array($wd, $week_days) && $wd === $today):
+                $now_top_in_cell = $w_now_m;
             ?>
-            <div class="day-appt-block" style="top:<?php echo $am;?>px;height:<?php echo min($dur,60-$am);?>px;left:2px;right:2px;background:<?php echo $c['bg'];?>;border-color:<?php echo $c['border'];?>;color:<?php echo $c['text'];?>;padding:3px 5px;font-size:0.68rem;" onclick="openApptModal(<?php echo htmlspecialchars(json_encode($a),ENT_QUOTES);?>)" title="<?php echo htmlspecialchars($ts.' — '.ucwords(strtolower($a['patient_name']??'')).' | '.($a['service_name']??''));?>">
-                <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?php echo htmlspecialchars($sn);?></div>
-                <?php if($dur>=35): ?><div style="font-size:0.6rem;opacity:0.75;"><?php echo $ts;?></div><?php endif;?>
+            <div style="position:absolute;left:0;right:0;top:<?php echo $now_top_in_cell;?>px;height:2px;background:#ef4444;z-index:10;pointer-events:none;">
+                <div style="position:absolute;left:-4px;top:-4px;width:10px;height:10px;border-radius:50%;background:#ef4444;"></div>
+            </div>
+            <?php endif;?>
+
+            <?php
+            // Render appointments that start in this hour for this day
+            foreach($week_appts_by_day[$wd] as $a):
+                $ah = intval(substr($a['appointment_time'],0,2));
+                if ($ah !== $h) continue; // only render in the correct hour cell
+                $am  = intval(substr($a['appointment_time'],3,2));
+                $dur = max(25, intval($a['duration_minutes'] ?? 30));
+                // Position within the 60px hour cell
+                $top_in_cell = $am; // 1min = 1px
+                $c   = isset($a['doctor_id'])&&$a['doctor_id'] ? ($doctor_color_map[$a['doctor_id']]??$default_color) : $default_color;
+                $dot = $status_dot[$a['status']] ?? '#95a5a6';
+                $name_parts = explode(' ', ucwords(strtolower($a['patient_name']??'')));
+                $short_name = $name_parts[0] . (isset($name_parts[1]) ? ' '.substr($name_parts[1],0,1).'.' : '');
+                $ts  = date('h:i A', strtotime($a['appointment_time']));
+            ?>
+            <div class="day-appt-block"
+                 style="top:<?php echo $top_in_cell;?>px;height:<?php echo min($dur, 60 - $top_in_cell);?>px;left:2px;right:2px;background:<?php echo $c['bg'];?>;border-color:<?php echo $c['border'];?>;color:<?php echo $c['text'];?>;padding:3px 5px;font-size:0.68rem;"
+                 onclick="openApptModal(<?php echo htmlspecialchars(json_encode($a),ENT_QUOTES);?>)"
+                 title="<?php echo htmlspecialchars($ts.' — '.ucwords(strtolower($a['patient_name']??'')).' | '.($a['service_name']??''));?>">
+                <div style="font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?php echo htmlspecialchars($short_name);?></div>
+                <?php if($dur >= 35): ?><div style="font-size:0.6rem;opacity:0.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"><?php echo $ts;?></div><?php endif;?>
+                <?php if(!empty(trim($a['allergies']??''))): ?><div style="font-size:0.58rem;background:#fee2e2;color:#dc2626;border-radius:2px;padding:0 3px;display:inline-block;margin-top:1px;">⚠ ALLERGY</div><?php endif;?>
                 <span style="position:absolute;top:3px;right:4px;width:6px;height:6px;border-radius:50%;background:<?php echo $dot;?>;display:inline-block;"></span>
             </div>
             <?php endforeach;?>
@@ -415,7 +577,7 @@ $w_now_h = intval(date('G')); $w_now_m = intval(date('i'));
 </div>
 
 <?php else: ?>
-<!-- ══ DAY VIEW ════════════════════════════════════════════════════════════ -->
+<!-- DAY VIEW -->
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
     <a href="calendar.php?view=day&date=<?php echo $prev_day;?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-chevron-left"></i></a>
     <h6 style="margin:0;min-width:200px;text-align:center;"><?php echo $day_label;?></h6>
@@ -431,8 +593,8 @@ $w_now_h = intval(date('G')); $w_now_m = intval(date('i'));
 </div>
 <?php endif;?>
 <?php
-$open_h  = isset($sched['open_time'])  ? intval(substr($sched['open_time'],  0, 2)) : 8;
-$close_h = isset($sched['close_time']) ? intval(substr($sched['close_time'], 0, 2)) : 18;
+$open_h =intval(substr($sched['open_time']??'08:00',0,2));
+$close_h=intval(substr($sched['close_time']??'18:00',0,2));
 if($close_h<=$open_h) $close_h=$open_h+10;
 $total_hours=$close_h-$open_h;
 $now_h=intval(date('G')); $now_m=intval(date('i'));
@@ -468,7 +630,9 @@ $show_now=($day_date===$today&&$now_h>=$open_h&&$now_h<$close_h);
             $te=date('h:i A',strtotime('+'.$dur.' minutes',strtotime($a['appointment_time'])));
             $has_allergy=!empty(trim($a['allergies']??''));
         ?>
-        <div class="day-appt-block" style="top:<?php echo $top_px;?>px;height:<?php echo $dur;?>px;background:<?php echo $c['bg'];?>;border-color:<?php echo $c['border'];?>;color:<?php echo $c['text'];?>;" onclick="openApptModal(<?php echo htmlspecialchars(json_encode($a),ENT_QUOTES);?>)">
+        <div class="day-appt-block"
+             style="top:<?php echo $top_px;?>px;height:<?php echo $dur;?>px;background:<?php echo $c['bg'];?>;border-color:<?php echo $c['border'];?>;color:<?php echo $c['text'];?>;"
+             onclick="openApptModal(<?php echo htmlspecialchars(json_encode($a),ENT_QUOTES);?>)">
             <div class="day-appt-title"><?php echo htmlspecialchars($name);?></div>
             <?php if($dur>=44): ?>
             <div class="day-appt-sub"><?php echo htmlspecialchars($a['service_name']??'No service');?></div>
@@ -484,7 +648,7 @@ $show_now=($day_date===$today&&$now_h>=$open_h&&$now_h<$close_h);
 </div>
 </div>
 
-<!-- Day detail modal -->
+<!-- Day detail modal (month view) -->
 <div class="modal fade" id="dayModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 20px 60px rgba(0,0,0,0.15);">
@@ -508,7 +672,10 @@ $show_now=($day_date===$today&&$now_h>=$open_h&&$now_h<$close_h);
         <div class="modal-content" style="border-radius:14px;border:none;box-shadow:0 20px 60px rgba(0,0,0,0.15);">
             <div id="apptModalHeaderWrap" style="padding:20px 22px 14px;border-bottom:var(--border);">
                 <div style="display:flex;align-items:flex-start;justify-content:space-between;">
-                    <div style="flex:1;"><div id="apptModalName" style="font-size:1.05rem;font-weight:700;color:var(--gray-900);"></div><div id="apptModalCode" style="font-size:0.8rem;color:var(--gray-500);margin-top:2px;"></div></div>
+                    <div style="flex:1;">
+                        <div id="apptModalName" style="font-size:1.05rem;font-weight:700;color:var(--gray-900);"></div>
+                        <div id="apptModalCode" style="font-size:0.8rem;color:var(--gray-500);margin-top:2px;"></div>
+                    </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" style="margin-left:10px;"></button>
                 </div>
                 <div id="apptAllergyAlert" style="display:none;" class="allergy-alert">
@@ -553,10 +720,13 @@ $show_now=($day_date===$today&&$now_h>=$open_h&&$now_h<$close_h);
                     <input type="date" name="appointment_date" id="drawerDate" class="form-control" min="<?php echo date('Y-m-d');?>" value="<?php echo date('Y-m-d');?>">
                     <div style="font-size:0.72rem;color:var(--gray-500);margin-top:4px;">Today = walk-in. Future date = advance booking.</div>
                 </div>
+                <!-- Patient search -->
                 <div class="col-12">
                     <label class="form-label" style="font-weight:600;">Patient Search</label>
                     <div style="position:relative;">
-                        <input type="text" id="drawerPatientSearch" class="form-control" placeholder="Search by name or phone…" autocomplete="off" oninput="searchPatient(this.value)">
+                        <input type="text" id="drawerPatientSearch" class="form-control"
+                            placeholder="Search by name or phone to find returning patient…"
+                            autocomplete="off" oninput="searchPatient(this.value)">
                         <div id="drawerPatientResults" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:500;background:var(--white);border:var(--border);border-top:none;border-radius:0 0 8px 8px;box-shadow:0 6px 20px rgba(0,0,0,0.1);max-height:200px;overflow-y:auto;"></div>
                     </div>
                     <div id="drawerPatientSelected" style="display:none;margin-top:7px;background:var(--blue-50);border:1px solid var(--blue-200);border-radius:8px;padding:8px 12px;font-size:0.82rem;align-items:center;gap:8px;">
@@ -571,9 +741,19 @@ $show_now=($day_date===$today&&$now_h>=$open_h&&$now_h<$close_h);
                         </button>
                     </div>
                 </div>
-                <div class="col-6" id="drawerFirstNameWrap" style="display:none;"><label class="form-label">First Name <span style="color:var(--danger)">*</span></label><input type="text" name="first_name" id="drawerFirstName" class="form-control" placeholder="e.g. Juan"></div>
-                <div class="col-6" id="drawerLastNameWrap" style="display:none;"><label class="form-label">Last Name <span style="color:var(--danger)">*</span></label><input type="text" name="last_name" id="drawerLastName" class="form-control" placeholder="e.g. dela Cruz"></div>
-                <div class="col-12" id="drawerPhoneWrap" style="display:none;"><label class="form-label">Phone <span style="font-size:0.72rem;color:var(--gray-400);font-weight:400;">(optional)</span></label><input type="text" name="phone" class="form-control" placeholder="09XXXXXXXXX" maxlength="13"></div>
+                <!-- Name fields hidden by default -->
+                <div class="col-6" id="drawerFirstNameWrap" style="display:none;">
+                    <label class="form-label">First Name <span style="color:var(--danger)">*</span></label>
+                    <input type="text" name="first_name" id="drawerFirstName" class="form-control" placeholder="e.g. Juan">
+                </div>
+                <div class="col-6" id="drawerLastNameWrap" style="display:none;">
+                    <label class="form-label">Last Name <span style="color:var(--danger)">*</span></label>
+                    <input type="text" name="last_name" id="drawerLastName" class="form-control" placeholder="e.g. dela Cruz">
+                </div>
+                <div class="col-12" id="drawerPhoneWrap" style="display:none;">
+                    <label class="form-label">Phone <span style="font-size:0.72rem;color:var(--gray-400);font-weight:400;">(optional)</span></label>
+                    <input type="text" name="phone" class="form-control" placeholder="09XXXXXXXXX" maxlength="13">
+                </div>
                 <div class="col-12">
                     <label class="form-label">Service</label>
                     <select name="service_id" class="form-select">
@@ -585,20 +765,16 @@ $show_now=($day_date===$today&&$now_h>=$open_h&&$now_h<$close_h);
                     <label class="form-label">Doctor</label>
                     <select name="doctor_id" id="drawerDoctorSelect" class="form-select">
                         <option value="">Any Available Doctor</option>
-                        <?php
-                        $ta = strtolower(substr(date('l'),0,3));
-                        foreach($all_docs_dw as $d):
-                            $dd = array_map('trim', explode(',', $d['schedule_days'] ?? ''));
-                            if(!empty($dd[0]) && !in_array($ta, $dd)) continue;
-                        ?>
-                        <option value="<?php echo $d['id'];?>"><?php echo e($d['full_name']);?><?php if($d['specialization']): ?> — <?php echo e($d['specialization']);?><?php endif;?></option>
-                        <?php endforeach;?>
+                        <?php $ta=strtolower(substr(date('l'),0,3)); foreach($all_docs_dw as $d): $dd=array_map('trim',explode(',',$d['schedule_days']??'')); if(!in_array($ta,$dd)) continue; ?><option value="<?php echo $d['id'];?>"><?php echo e($d['full_name']);?><?php if($d['specialization']): ?> — <?php echo e($d['specialization']);?><?php endif;?></option><?php endforeach;?>
                     </select>
                     <div id="drawerDoctorNote" style="font-size:0.72rem;color:var(--gray-400);margin-top:3px;">Showing doctors available today.</div>
                 </div>
+                <!-- Time slot — always visible, optional for today, required for future -->
                 <div class="col-12" id="drawerSlotPickerWrap">
                     <label class="form-label">Preferred Time <span style="color:var(--danger)" id="drawerTimeRequired">*</span><span id="drawerTimeOptionalNote" style="font-size:0.72rem;color:var(--gray-400);font-weight:400;display:none;"> (optional — leave blank to auto-assign)</span></label>
-                    <select name="selected_time" id="drawerSlotSelect" class="form-select"><option value="">— Loading slots… —</option></select>
+                    <select name="selected_time" id="drawerSlotSelect" class="form-select">
+                        <option value="">— Loading slots… —</option>
+                    </select>
                     <div id="drawerSlotNote" style="font-size:0.72rem;color:var(--gray-400);margin-top:3px;"></div>
                 </div>
                 <div class="col-12"><label class="form-label">Notes</label><textarea name="notes" class="form-control" rows="2" maxlength="500"></textarea></div>
@@ -627,7 +803,7 @@ var dayModal=new bootstrap.Modal(document.getElementById('dayModal'));
 var apptModal=new bootstrap.Modal(document.getElementById('apptModal'));
 var _curAppt=null;
 function ucwords(s){return s.toLowerCase().replace(/(^|\s)\S/g,l=>l.toUpperCase());}
-function goToDay(d){openWalkinDrawer(d);}
+function goToDay(d){ openWalkinDrawer(d); }
 function viewDay(date){
     var appts=allAppts[date]||[];
     var d=new Date(date+'T12:00:00');
@@ -707,22 +883,25 @@ function scheduleFollowUp(){
     setTimeout(()=>{
         var fd=new Date();fd.setDate(fd.getDate()+7);
         var ds=fd.getFullYear()+'-'+String(fd.getMonth()+1).padStart(2,'0')+'-'+String(fd.getDate()).padStart(2,'0');
-        openWalkinDrawer(ds);
+        openWalkinDrawer();
         setTimeout(()=>{
+            document.getElementById('drawerDate').value=ds;loadDrawerDateData(ds);
             if(_curAppt.patient_name){var pts=_curAppt.patient_name.split(' ');var fn=document.querySelector('#walkinDrawerForm [name=first_name]');var ln=document.querySelector('#walkinDrawerForm [name=last_name]');if(fn&&pts.length)fn.value=pts[0];if(ln&&pts.length>1)ln.value=pts.slice(1).join(' ');}
-        },200);
+        },100);
     },350);
 }
-var _patientSearchTimer=null;
-var _newPatientFieldsVisible=false;
+// Drawer — fully synced with list.php
+var _patientSearchTimer = null;
+var _newPatientFieldsVisible = false;
+
 function openWalkinDrawer(presetDate){
     document.getElementById('walkinDrawer').classList.add('open');
     document.getElementById('drawerOverlay').classList.add('open');
     document.body.style.overflow='hidden';
     document.getElementById('walkinDrawerForm').reset();
-    var dateToUse=(presetDate&&presetDate>=_today)?presetDate:_today;
+    var dateToUse = (presetDate && presetDate >= _today) ? presetDate : _today;
     document.getElementById('drawerDate').value=dateToUse;
-    document.getElementById('walkinBtnLabel').textContent=dateToUse===_today?'Register Patient':'Book Appointment';
+    document.getElementById('walkinBtnLabel').textContent= dateToUse===_today ? 'Register Patient' : 'Book Appointment';
     document.getElementById('drawerExistingPatientId').value='';
     document.getElementById('drawerPatientSearch').value='';
     document.getElementById('drawerPatientResults').style.display='none';
@@ -733,45 +912,131 @@ function openWalkinDrawer(presetDate){
     hideDrawerAlert();
     loadDrawerDateData(dateToUse);
 }
-function closeWalkinDrawer(){document.getElementById('walkinDrawer').classList.remove('open');document.getElementById('drawerOverlay').classList.remove('open');document.body.style.overflow='';}
-function showNewPatientFields(show){['drawerFirstNameWrap','drawerLastNameWrap','drawerPhoneWrap'].forEach(function(id){var el=document.getElementById(id);if(el)el.style.display=show?'':'none';});var fn=document.getElementById('drawerFirstName');var ln=document.getElementById('drawerLastName');if(fn)fn.required=show;if(ln)ln.required=show;}
-function toggleNewPatientFields(){_newPatientFieldsVisible=!_newPatientFieldsVisible;showNewPatientFields(_newPatientFieldsVisible);updateNewPatientBtn();if(_newPatientFieldsVisible){document.getElementById('drawerExistingPatientId').value='';document.getElementById('drawerPatientSelected').style.display='none';}}
-function updateNewPatientBtn(){var btn=document.getElementById('drawerNewPatientBtn');if(!btn)return;if(_newPatientFieldsVisible){btn.innerHTML='<i class="bi bi-x"></i> Hide Name Fields';btn.classList.remove('btn-outline-secondary');btn.classList.add('btn-outline-danger');}else{btn.innerHTML='<i class="bi bi-person-plus"></i> Enter Name Manually';btn.classList.remove('btn-outline-danger');btn.classList.add('btn-outline-secondary');}}
-function searchPatient(q){clearTimeout(_patientSearchTimer);var results=document.getElementById('drawerPatientResults');if(q.length<2){results.style.display='none';return;}_patientSearchTimer=setTimeout(function(){fetch(_baseUrl+'modules/walkin/add.php?action=search_patient&q='+encodeURIComponent(q)).then(r=>r.json()).then(data=>{if(!data.patients||data.patients.length===0){results.innerHTML='<div style="padding:10px 14px;font-size:0.82rem;color:var(--gray-400);">No existing patients found — will register as new.</div>';}else{results.innerHTML=data.patients.map(p=>{var name=p.first_name+' '+p.last_name;var phone=p.phone||'No phone';var appts=p.appt_count+' appt'+(p.appt_count!=1?'s':'');return '<div style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);font-size:0.83rem;" onmouseenter="this.style.background=\'var(--gray-50)\'" onmouseleave="this.style.background=\'\'" onclick="selectPatient('+p.id+',\''+name.replace(/'/g,"\\'")+'\',\''+p.patient_code+'\',\''+phone.replace(/'/g,"\\'")+'\')"><div style="font-weight:600;">'+name+' <span style="font-size:0.72rem;color:var(--gray-400);">('+p.patient_code+')</span></div><div style="color:var(--gray-500);font-size:0.75rem;">'+phone+' · '+appts+'</div></div>';}).join('');}results.style.display='block';});},280);}
-function selectPatient(id,name,code,phone){document.getElementById('drawerExistingPatientId').value=id;document.getElementById('drawerPatientResults').style.display='none';document.getElementById('drawerPatientSearch').value='';document.getElementById('drawerPatientSelectedName').textContent=name+' ('+code+') · '+phone;document.getElementById('drawerPatientSelected').style.display='flex';_newPatientFieldsVisible=false;showNewPatientFields(false);updateNewPatientBtn();}
-function clearPatientSelection(){document.getElementById('drawerExistingPatientId').value='';document.getElementById('drawerPatientSelected').style.display='none';_newPatientFieldsVisible=true;showNewPatientFields(true);updateNewPatientBtn();}
-document.addEventListener('click',function(e){var res=document.getElementById('drawerPatientResults');var inp=document.getElementById('drawerPatientSearch');if(res&&inp&&!inp.contains(e.target)&&!res.contains(e.target))res.style.display='none';});
+function closeWalkinDrawer(){
+    document.getElementById('walkinDrawer').classList.remove('open');
+    document.getElementById('drawerOverlay').classList.remove('open');
+    document.body.style.overflow='';
+}
+function showNewPatientFields(show){
+    ['drawerFirstNameWrap','drawerLastNameWrap','drawerPhoneWrap'].forEach(function(id){
+        var el=document.getElementById(id);if(el)el.style.display=show?'':'none';
+    });
+    var fn=document.getElementById('drawerFirstName');
+    var ln=document.getElementById('drawerLastName');
+    if(fn)fn.required=show; if(ln)ln.required=show;
+}
+function toggleNewPatientFields(){
+    _newPatientFieldsVisible=!_newPatientFieldsVisible;
+    showNewPatientFields(_newPatientFieldsVisible);
+    updateNewPatientBtn();
+    if(_newPatientFieldsVisible){
+        document.getElementById('drawerExistingPatientId').value='';
+        document.getElementById('drawerPatientSelected').style.display='none';
+    }
+}
+function updateNewPatientBtn(){
+    var btn=document.getElementById('drawerNewPatientBtn');if(!btn)return;
+    if(_newPatientFieldsVisible){btn.innerHTML='<i class="bi bi-x"></i> Hide Name Fields';btn.classList.remove('btn-outline-secondary');btn.classList.add('btn-outline-danger');}
+    else{btn.innerHTML='<i class="bi bi-person-plus"></i> Enter Name Manually';btn.classList.remove('btn-outline-danger');btn.classList.add('btn-outline-secondary');}
+}
+function searchPatient(q){
+    clearTimeout(_patientSearchTimer);
+    var results=document.getElementById('drawerPatientResults');
+    if(q.length<2){results.style.display='none';return;}
+    _patientSearchTimer=setTimeout(function(){
+        fetch(_baseUrl+'modules/walkin/add.php?action=search_patient&q='+encodeURIComponent(q))
+        .then(r=>r.json()).then(data=>{
+            if(!data.patients||data.patients.length===0){results.innerHTML='<div style="padding:10px 14px;font-size:0.82rem;color:var(--gray-400);">No existing patients found — will register as new.</div>';}
+            else{results.innerHTML=data.patients.map(p=>{var name=p.first_name+' '+p.last_name;var phone=p.phone||'No phone';var appts=p.appt_count+' appt'+(p.appt_count!=1?'s':'');return '<div style="padding:9px 14px;cursor:pointer;border-bottom:1px solid var(--gray-100);font-size:0.83rem;transition:background 0.12s;" onmouseenter="this.style.background=\'var(--gray-50)\'" onmouseleave="this.style.background=\'\'" onclick="selectPatient('+p.id+',\''+name.replace(/'/g,"\\'")+'\',\''+p.patient_code+'\',\''+phone.replace(/'/g,"\\'")+'\')"><div style="font-weight:600;">'+name+' <span style="font-size:0.72rem;color:var(--gray-400);">('+p.patient_code+')</span></div><div style="color:var(--gray-500);font-size:0.75rem;">'+phone+' · '+appts+'</div></div>';}).join('');}
+            results.style.display='block';
+        });
+    },280);
+}
+function selectPatient(id,name,code,phone){
+    document.getElementById('drawerExistingPatientId').value=id;
+    document.getElementById('drawerPatientResults').style.display='none';
+    document.getElementById('drawerPatientSearch').value='';
+    document.getElementById('drawerPatientSelectedName').textContent=name+' ('+code+') · '+phone;
+    document.getElementById('drawerPatientSelected').style.display='flex';
+    _newPatientFieldsVisible=false;
+    showNewPatientFields(false);
+    updateNewPatientBtn();
+}
+function clearPatientSelection(){
+    document.getElementById('drawerExistingPatientId').value='';
+    document.getElementById('drawerPatientSelected').style.display='none';
+    _newPatientFieldsVisible=true;
+    showNewPatientFields(true);
+    updateNewPatientBtn();
+}
+document.addEventListener('click',function(e){
+    var res=document.getElementById('drawerPatientResults');
+    var inp=document.getElementById('drawerPatientSearch');
+    if(res&&inp&&!inp.contains(e.target)&&!res.contains(e.target))res.style.display='none';
+});
 function loadDrawerDateData(date){
-    var bar=document.getElementById('drawerSlotBar');var docSelect=document.getElementById('drawerDoctorSelect');var slotSelect=document.getElementById('drawerSlotSelect');var slotNote=document.getElementById('drawerSlotNote');var docNote=document.getElementById('drawerDoctorNote');var timeReq=document.getElementById('drawerTimeRequired');var timeOpt=document.getElementById('drawerTimeOptionalNote');var isToday=(date===_today);
+    var bar=document.getElementById('drawerSlotBar');
+    var docSelect=document.getElementById('drawerDoctorSelect');
+    var slotSelect=document.getElementById('drawerSlotSelect');
+    var slotNote=document.getElementById('drawerSlotNote');
+    var docNote=document.getElementById('drawerDoctorNote');
+    var timeReq=document.getElementById('drawerTimeRequired');
+    var timeOpt=document.getElementById('drawerTimeOptionalNote');
+    var isToday=(date===_today);
     bar.innerHTML='<span style="color:var(--gray-400);">Checking schedule…</span>';
-    fetch(_baseUrl+'modules/walkin/add.php?action=get_slots&date='+encodeURIComponent(date)).then(r=>r.json()).then(data=>{
+    fetch(_baseUrl+'modules/walkin/add.php?action=get_slots&date='+encodeURIComponent(date))
+    .then(r=>r.json()).then(data=>{
         if(data.status!=='success'){bar.innerHTML='<i class="bi bi-exclamation-triangle-fill" style="color:#f59e0b;"></i> '+(data.message||'Could not load schedule.');return;}
         var sd=data.slot_data,docs=data.doctors||[];
         if(sd.is_closed){bar.innerHTML='<i class="bi bi-calendar-x" style="color:#f59e0b;"></i> <strong>'+sd.reason+'</strong>';}
         else{var free=(sd.total_slots||0)-(sd.booked_count||0);var nextPart=sd.slot?' · Next: <strong style="color:#2563eb;">'+sd.label+'</strong>':'';bar.innerHTML='<i class="bi bi-calendar-check" style="color:#2563eb;"></i> '+data.day_name+' — <strong style="color:#2563eb;">'+free+' slot'+(free!==1?'s':'')+' free</strong>'+nextPart;}
-        var savedDoc=docSelect.value;docSelect.innerHTML='<option value="">Any Available Doctor</option>';
-        if(!docs.length){docNote.textContent='No doctors scheduled on this day.';}else{docs.forEach(function(d){var o=document.createElement('option');o.value=d.id;o.textContent=d.full_name+(d.specialization?' — '+d.specialization:'');if(String(d.id)===String(savedDoc))o.selected=true;docSelect.appendChild(o);});docNote.textContent=docs.length+' doctor'+(docs.length!==1?'s':'')+' available on this day.';}
+        var savedDoc=docSelect.value;
+        docSelect.innerHTML='<option value="">Any Available Doctor</option>';
+        if(!docs.length){docNote.textContent='No doctors scheduled on this day.';}
+        else{docs.forEach(function(d){var o=document.createElement('option');o.value=d.id;o.textContent=d.full_name+(d.specialization?' — '+d.specialization:'');if(String(d.id)===String(savedDoc))o.selected=true;docSelect.appendChild(o);});docNote.textContent=docs.length+' doctor'+(docs.length!==1?'s':'')+' available on this day.';}
+        // Slot picker always visible
         document.getElementById('walkinBtnLabel').textContent=isToday?'Register Patient':'Book Appointment';
         slotSelect.innerHTML='<option value="">'+(isToday?'— Auto-assign next slot —':'— Choose a time slot —')+'</option>';
-        if(isToday){if(timeReq)timeReq.style.display='none';if(timeOpt)timeOpt.style.display='';slotSelect.removeAttribute('required');}else{if(timeReq)timeReq.style.display='';if(timeOpt)timeOpt.style.display='none';slotSelect.setAttribute('required','required');}
-        if(sd.is_closed){slotSelect.innerHTML='<option value="" disabled>Clinic closed this day</option>';slotNote.textContent='';}else{var fc=0;(sd.all_slots||[]).forEach(function(s){if(!s.taken&&!s.past){var o=document.createElement('option');o.value=s.time;o.textContent=s.label;slotSelect.appendChild(o);fc++;}});slotNote.textContent=fc>0?fc+' available slot'+(fc!==1?'s':'')+'.':'No available slots.';if(!fc)slotSelect.innerHTML='<option value="" disabled>No slots available</option>';}
+        if(isToday){if(timeReq)timeReq.style.display='none';if(timeOpt)timeOpt.style.display='';slotSelect.removeAttribute('required');}
+        else{if(timeReq)timeReq.style.display='';if(timeOpt)timeOpt.style.display='none';slotSelect.setAttribute('required','required');}
+        if(sd.is_closed){slotSelect.innerHTML='<option value="" disabled>Clinic closed this day</option>';slotNote.textContent='';}
+        else{var fc=0;(sd.all_slots||[]).forEach(function(s){if(!s.taken&&!s.past){var o=document.createElement('option');o.value=s.time;o.textContent=s.label+(isToday&&sd.slot&&s.time+':00'===sd.slot?' ← auto':'');slotSelect.appendChild(o);fc++;}});slotNote.textContent=fc>0?fc+' available slot'+(fc!==1?'s':'')+'.':'No available slots.';if(!fc)slotSelect.innerHTML='<option value="" disabled>No slots available</option>';}
     }).catch(()=>{bar.innerHTML='<span style="color:var(--gray-400);">Could not load schedule.</span>';});
 }
-document.addEventListener('DOMContentLoaded',function(){var di=document.getElementById('drawerDate');if(di)di.addEventListener('change',function(){if(this.value)loadDrawerDateData(this.value);});});
+document.addEventListener('DOMContentLoaded',function(){
+    var di=document.getElementById('drawerDate');
+    if(di)di.addEventListener('change',function(){if(this.value)loadDrawerDateData(this.value);});
+});
 function showDrawerAlert(t,m){var e=document.getElementById('drawerAlert');e.style.display='block';e.innerHTML='<div class="alert alert-'+t+'" style="margin:0;font-size:0.85rem;"><i class="bi bi-'+(t==='danger'?'x-circle-fill':'check-circle-fill')+'"></i> '+m+'</div>';}
 function hideDrawerAlert(){document.getElementById('drawerAlert').style.display='none';}
 function submitWalkin(){
-    var form=document.getElementById('walkinDrawerForm');var btn=document.getElementById('walkinSubmitBtn');
+    var form=document.getElementById('walkinDrawerForm');
+    var btn=document.getElementById('walkinSubmitBtn');
     var existingId=document.getElementById('drawerExistingPatientId').value;
-    var date=form.querySelector('[name=appointment_date]').value||_today;var isToday=(date===_today);
+    var date=form.querySelector('[name=appointment_date]').value||_today;
+    var isToday=(date===_today);
     var sv=form.querySelector('[name=selected_time]')?form.querySelector('[name=selected_time]').value:'';
-    if(!existingId){var first=form.querySelector('[name=first_name]')?form.querySelector('[name=first_name]').value.trim():'';var last=form.querySelector('[name=last_name]')?form.querySelector('[name=last_name]').value.trim():'';if(!first||!last){showDrawerAlert('danger','Enter a patient name, or search and select an existing patient.');return;}}
+    if(!existingId){
+        var first=form.querySelector('[name=first_name]')?form.querySelector('[name=first_name]').value.trim():'';
+        var last=form.querySelector('[name=last_name]')?form.querySelector('[name=last_name]').value.trim():'';
+        if(!first||!last){showDrawerAlert('danger','Enter a patient name, or search and select an existing patient.');return;}
+    }
     if(!isToday&&!sv){showDrawerAlert('danger','Please select a time slot for the advance booking.');return;}
-    btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> '+(isToday?'Registering...':'Booking...');hideDrawerAlert();
-    fetch(_baseUrl+'modules/walkin/add.php',{method:'POST',body:new FormData(form)}).then(r=>r.json()).then(res=>{
+    btn.disabled=true;btn.innerHTML='<span class="spinner-border spinner-border-sm"></span> '+(isToday?'Registering...':'Booking...');
+    hideDrawerAlert();
+    fetch(_baseUrl+'modules/walkin/add.php',{method:'POST',body:new FormData(form)})
+    .then(r=>r.json()).then(res=>{
         btn.disabled=false;btn.innerHTML='<i class="bi bi-person-check-fill"></i> <span id="walkinBtnLabel">'+(isToday?'Register Patient':'Book Appointment')+'</span>';
-        if(res.status==='success'){closeWalkinDrawer();var appt=res.appt||{};var tl=appt.time?new Date('1970-01-01T'+appt.time).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',hour12:true}):'';var isRet=res.is_returning;document.getElementById('walkinToastTitle').textContent=isRet?'📋 Returning Patient Booked!':(isToday?'✅ Patient Registered!':'📅 Advance Booking Saved!');document.getElementById('walkinToastMsg').innerHTML='<strong>'+(appt.patient_name||'')+'</strong>'+(isRet?' <em style="font-size:0.75rem;">(existing record used)</em>':'')+'<br>'+appt.appt_code+' at '+tl;var toast=document.getElementById('walkinToast');toast.style.display='block';setTimeout(()=>{toast.style.display='none';},6000);setTimeout(()=>location.reload(),1000);}
-        else{showDrawerAlert('danger',res.message||'Something went wrong.');}
+        if(res.status==='success'){
+            closeWalkinDrawer();
+            var appt=res.appt||{};
+            var tl=appt.time?new Date('1970-01-01T'+appt.time).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',hour12:true}):'';
+            var isRet=res.is_returning;
+            document.getElementById('walkinToastTitle').textContent=isRet?'📋 Returning Patient Booked!':(isToday?'✅ Patient Registered!':'📅 Advance Booking Saved!');
+            document.getElementById('walkinToastMsg').innerHTML='<strong>'+(appt.patient_name||'')+'</strong>'+(isRet?' <em style="font-size:0.75rem;">(existing record used)</em>':'')+'<br>'+appt.appt_code+' at '+tl;
+            var toast=document.getElementById('walkinToast');toast.style.display='block';setTimeout(()=>{toast.style.display='none';},6000);
+            setTimeout(()=>location.reload(),1000);
+        }else{showDrawerAlert('danger',res.message||'Something went wrong.');}
     }).catch(()=>{btn.disabled=false;btn.innerHTML='<i class="bi bi-person-check-fill"></i> <span id="walkinBtnLabel">Register Patient</span>';showDrawerAlert('danger','Network error. Please try again.');});
 }
 </script>
