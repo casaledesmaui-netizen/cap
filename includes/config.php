@@ -26,7 +26,8 @@
 // NEVER send users back to the login page just because the .env BASE_URL has the
 // wrong port or path for the current server setup.
 if (!empty($_SERVER['HTTP_HOST'])) {
-    $scheme  = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https'
+        : ((!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') ? 'https' : 'http');
     $host    = $_SERVER['HTTP_HOST']; // includes :port if non-standard
     $script  = str_replace('\\', '/', $_SERVER['SCRIPT_NAME'] ?? '/index.php');
     // Find the app root by stripping known sub-directory segments
