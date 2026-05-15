@@ -1,9 +1,10 @@
 /* app.js — Global JavaScript loaded on every admin page.
    Handles: alert auto-dismiss, confirm dialogs, mobile sidebar overlay,
    table row counts, auto-submit filters, back-to-top, keyboard shortcuts,
-   empty state upgrades, and active breadcrumb. */
+   empty state upgrades, active breadcrumb, and PJAX navigation. */
 
-document.addEventListener('DOMContentLoaded', function () {
+// ─── PAGE INIT (runs on first load AND after every PJAX swap) ───────────────
+function initPage() {
 
     // ─── 1. AUTO-DISMISS ALERTS ─────────────────────────────────────────────
     document.querySelectorAll('.alert:not(.alert-permanent)').forEach(function (alert) {
@@ -21,31 +22,6 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     });
 
-    // ─── 3. MOBILE SIDEBAR BACKDROP ─────────────────────────────────────────
-    // The toggle click-listener lives in header.php (runs before DOMContentLoaded
-    // to prevent layout flash). It already handles .collapsed on desktop and
-    // .mobile-open on mobile. Here we only add the backdrop-click-to-close
-    // behaviour so the user can dismiss the sidebar by tapping outside it.
-    var sidebar = document.getElementById('sidebar');
-
-    if (sidebar){
-        var backdrop = document.createElement('div');
-        backdrop.id = 'sidebar-backdrop';
-        backdrop.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:999;cursor:pointer;';
-        document.body.appendChild(backdrop);
-
-        var sidebarObserver = new MutationObserver(function () {
-            backdrop.style.display = (window.innerWidth <= 768 && sidebar.classList.contains('mobile-open'))
-                ? 'block' : 'none';
-        });
-        sidebarObserver.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
-
-        backdrop.addEventListener('click', function () {
-            sidebar.classList.remove('mobile-open');
-            backdrop.style.display = 'none';
-        });
-    }
-
     document.querySelectorAll('.card').forEach(function (card) {
         var tbody = card.querySelector('tbody');
         if (!tbody) return;
@@ -55,10 +31,8 @@ document.addEventListener('DOMContentLoaded', function () {
         });
         var count = rows.length;
 
-        // Find a sensible place to insert: look for a card-header first,
-        // then fall back to inserting before the card itself.
         var cardHeader = card.querySelector('.card-header');
-        if (cardHeader) {
+        if (cardHeader && !cardHeader.querySelector('.row-count-badge')) {
             var badge = document.createElement('span');
             badge.className = 'row-count-badge';
             badge.textContent = count + ' result' + (count !== 1 ? 's' : '');
@@ -67,7 +41,6 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ─── 5. AUTO-SUBMIT FILTER DROPDOWNS ────────────────────────────────────
-    // Any <select> inside a GET filter form auto-submits on change.
     document.querySelectorAll('form[method="GET"] select').forEach(function (sel) {
         sel.addEventListener('change', function () {
             this.closest('form').submit();
@@ -75,15 +48,16 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ─── 6. BACK-TO-TOP BUTTON ──────────────────────────────────────────────
-    var btt = document.createElement('button');
-    btt.id = 'back-to-top';
-    btt.innerHTML = '<i class="bi bi-arrow-up"></i>';
-    btt.title = 'Back to top';
-    btt.setAttribute('aria-label', 'Back to top');
-    document.body.appendChild(btt);
+    var btt = document.getElementById('back-to-top');
+    if (!btt) {
+        btt = document.createElement('button');
+        btt.id = 'back-to-top';
+        btt.innerHTML = '<i class="bi bi-arrow-up"></i>';
+        btt.title = 'Back to top';
+        btt.setAttribute('aria-label', 'Back to top');
+        document.body.appendChild(btt);
+    }
 
-    // .main-content is the scroll container (overflow-y: auto).
-    // Fall back to window for pages that don't have it (e.g. login).
     var scrollEl = document.querySelector('.main-content') || window;
 
     function onScroll() {
@@ -91,20 +65,17 @@ document.addEventListener('DOMContentLoaded', function () {
         btt.classList.toggle('btt-visible', top > 280);
     }
 
+    scrollEl.removeEventListener('scroll', onScroll);
     scrollEl.addEventListener('scroll', onScroll, { passive: true });
 
-    btt.addEventListener('click', function () {
+    btt.onclick = function () {
         scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
-    });
+    };
 
     // ─── 7. KEYBOARD SHORTCUTS ──────────────────────────────────────────────
-    // "/" → focus the first visible search input on the page
-    // "n" / "N" → click the first primary "Add / Book / Create" button
-    // Both are suppressed when focus is already inside an input/textarea/select
-
-    // Inject a small "/" hint after the first search input group
     var firstSearch = document.querySelector('input[name="search"], input[type="search"]');
-    if (firstSearch) {
+    if (firstSearch && !firstSearch.dataset.hintAdded) {
+        firstSearch.dataset.hintAdded = '1';
         var hint = document.createElement('span');
         hint.className = 'kbd-hint';
         hint.innerHTML = 'Press <kbd>/</kbd> to search';
@@ -114,48 +85,18 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    document.addEventListener('keydown', function (e) {
-        var tag = document.activeElement ? document.activeElement.tagName : '';
-        var inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-                       || document.activeElement.isContentEditable);
-
-        if (e.key === '/' && !inInput && !e.ctrlKey && !e.metaKey) {
-            var searchInput = document.querySelector(
-                'input[name="search"], input[type="search"], input[placeholder*="earch"]'
-            );
-            if (searchInput) {
-                e.preventDefault();
-                searchInput.focus();
-                searchInput.select();
-            }
-        }
-
-        if ((e.key === 'n' || e.key === 'N') && !inInput && !e.ctrlKey && !e.metaKey) {
-            var addBtn = document.querySelector(
-                'a.btn-primary[href*="add"], a.btn-primary[href*="create"], a.btn-primary[href*="book"]'
-            );
-            if (addBtn) {
-                e.preventDefault();
-                addBtn.click();
-            }
-        }
-    });
-
     // ─── 8. IMPROVED EMPTY STATES ───────────────────────────────────────────
-    // Replace plain "No X found." text rows with a nicer icon + message block.
     var emptyConfig = {
-        'No patients yet.'         : { icon: 'bi-people',          msg: 'No patients yet',          hint: 'Add your first patient to get started.', action: null },
-        'No appointments found.'   : { icon: 'bi-calendar-x',      msg: 'No appointments found',    hint: 'Try adjusting your filters.', action: null },
-        'No bills found.'          : { icon: 'bi-receipt',         msg: 'No bills found',           hint: 'Bills will appear here once created.', action: null },
-        'No dental records found.' : { icon: 'bi-journal-medical', msg: 'No dental records',        hint: 'No treatment records have been added yet.', action: null },
-        'No logs found.'           : { icon: 'bi-shield-check',    msg: 'No activity yet',          hint: 'Audit logs will appear here as actions are taken.', action: null },
-        'No users found.'          : { icon: 'bi-person-x',        msg: 'No users found',           hint: 'No users match your search.', action: null }
+        'No patients yet.'         : { icon: 'bi-people',          msg: 'No patients yet',          hint: 'Add your first patient to get started.' },
+        'No appointments found.'   : { icon: 'bi-calendar-x',      msg: 'No appointments found',    hint: 'Try adjusting your filters.' },
+        'No bills found.'          : { icon: 'bi-receipt',         msg: 'No bills found',           hint: 'Bills will appear here once created.' },
+        'No dental records found.' : { icon: 'bi-journal-medical', msg: 'No dental records',        hint: 'No treatment records have been added yet.' },
+        'No logs found.'           : { icon: 'bi-shield-check',    msg: 'No activity yet',          hint: 'Audit logs will appear here as actions are taken.' },
+        'No users found.'          : { icon: 'bi-person-x',        msg: 'No users found',           hint: 'No users match your search.' }
     };
 
     document.querySelectorAll('td[colspan]').forEach(function (td) {
         var text = td.textContent.trim();
-
-        // Handle "No results for X" search variant
         var isSearch = text.indexOf('No results for') === 0;
         var cfg = null;
 
@@ -167,11 +108,10 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
 
-        // Build improved empty state
         if (cfg || isSearch) {
-            var icon    = cfg ? cfg.icon : 'bi-search';
-            var msg     = isSearch ? 'No results found' : (cfg ? cfg.msg : text);
-            var hint    = isSearch ? 'Try a different search term or clear the filter.' : (cfg ? cfg.hint : '');
+            var icon = cfg ? cfg.icon : 'bi-search';
+            var msg  = isSearch ? 'No results found' : (cfg ? cfg.msg : text);
+            var hint = isSearch ? 'Try a different search term or clear the filter.' : (cfg ? cfg.hint : '');
 
             td.style.cssText = 'text-align:center;padding:48px 24px;';
             td.innerHTML =
@@ -188,10 +128,8 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     // ─── 9. ACTIVE BREADCRUMB ────────────────────────────────────────────────
-    // Read the page title from the topbar and inject a slim breadcrumb line
-    // below it so users always know where they are.
     var titleBlock = document.querySelector('.topbar-title-block');
-    if (titleBlock) {
+    if (titleBlock && !titleBlock.querySelector('#breadcrumb')) {
         var path = window.location.pathname;
         var crumbs = ['Home'];
 
@@ -221,5 +159,206 @@ document.addEventListener('DOMContentLoaded', function () {
             titleBlock.appendChild(bc);
         }
     }
+}
 
+// ─── PJAX NAVIGATION ────────────────────────────────────────────────────────
+// Intercepts sidebar nav link clicks, fetches the new page, swaps only
+// .main-content — sidebar/CSS/JS never reload, so navigation is instant.
+
+(function () {
+    var sidebar = document.getElementById('sidebar');
+    if (!sidebar) return;
+
+    // Loading bar element
+    var bar = document.createElement('div');
+    bar.id = 'pjax-bar';
+    bar.style.cssText = [
+        'position:fixed', 'top:0', 'left:0', 'height:3px', 'width:0',
+        'background:linear-gradient(90deg,#4f8ef7,#38c6b0)',
+        'z-index:99999', 'transition:width 0.25s ease,opacity 0.3s ease',
+        'pointer-events:none', 'opacity:0'
+    ].join(';');
+    document.body.appendChild(bar);
+
+    function barStart() {
+        bar.style.opacity = '1';
+        bar.style.width = '60%';
+    }
+    function barDone() {
+        bar.style.width = '100%';
+        setTimeout(function () {
+            bar.style.opacity = '0';
+            setTimeout(function () { bar.style.width = '0'; }, 300);
+        }, 200);
+    }
+
+    // Update sidebar active link highlight
+    function updateActiveLink(url) {
+        sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
+            var href = a.getAttribute('href');
+            if (!href) return;
+            // Match by path ending — e.g. "list.php" in href vs current url
+            var aPath = a.href.split('?')[0];
+            var uPath = url.split('?')[0];
+            a.classList.toggle('active', aPath === uPath);
+        });
+    }
+
+    // The core swap function
+    function pjaxLoad(url, pushState) {
+        barStart();
+
+        fetch(url, {
+            headers: { 'X-Requested-With': 'pjax' },
+            credentials: 'same-origin'
+        })
+        .then(function (res) {
+            // If server redirects to login, follow it fully
+            if (res.redirected && res.url.indexOf('index.php') !== -1) {
+                window.location.href = res.url;
+                return null;
+            }
+            return res.text();
+        })
+        .then(function (html) {
+            if (!html) return;
+
+            // Parse the fetched HTML
+            var parser = new DOMParser();
+            var doc    = parser.parseFromString(html, 'text/html');
+
+            var newMain = doc.querySelector('.main-content');
+            var curMain = document.querySelector('.main-content');
+
+            if (!newMain || !curMain) {
+                // Fallback: full reload if structure is unexpected
+                window.location.href = url;
+                return;
+            }
+
+            // Swap content
+            curMain.innerHTML = newMain.innerHTML;
+
+            // Update title
+            if (doc.title) document.title = doc.title;
+
+            // Push URL to browser history
+            if (pushState !== false) {
+                history.pushState({ pjax: true, url: url }, doc.title || '', url);
+            }
+
+            // Scroll new content to top
+            curMain.scrollTo({ top: 0 });
+
+            // Remove stale breadcrumb so initPage() can rebuild it
+            var oldBc = document.getElementById('breadcrumb');
+            if (oldBc) oldBc.remove();
+
+            // Re-run all page init for the new content
+            initPage();
+
+            // Update sidebar highlight
+            updateActiveLink(url);
+
+            barDone();
+        })
+        .catch(function () {
+            // Network error — fall back to normal navigation
+            window.location.href = url;
+        });
+    }
+
+    // Intercept sidebar nav link clicks only
+    sidebar.addEventListener('click', function (e) {
+        var link = e.target.closest('a.nav-link');
+        if (!link) return;
+
+        var href = link.getAttribute('href');
+        if (!href || href === '#' || href.startsWith('javascript')) return;
+
+        // Let logout and external links navigate normally
+        if (href.indexOf('index.php') !== -1 || link.target === '_blank') return;
+
+        // Let modified clicks (ctrl/cmd/shift) open normally
+        if (e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+        e.preventDefault();
+
+        // Build absolute URL
+        var url = link.href;
+
+        // Don't re-fetch current page
+        if (url.split('?')[0] === window.location.href.split('?')[0]) return;
+
+        pjaxLoad(url, true);
+    });
+
+    // Handle browser back / forward
+    window.addEventListener('popstate', function (e) {
+        if (e.state && e.state.pjax) {
+            pjaxLoad(e.state.url, false);
+        } else {
+            window.location.reload();
+        }
+    });
+
+    // Record initial state so back button works from first page
+    history.replaceState({ pjax: true, url: window.location.href }, document.title, window.location.href);
+
+})();
+
+// ─── ONE-TIME SETUP (sidebar, keyboard — runs once on first load only) ───────
+document.addEventListener('DOMContentLoaded', function () {
+
+    // ─── 3. MOBILE SIDEBAR BACKDROP ─────────────────────────────────────────
+    var sidebar = document.getElementById('sidebar');
+
+    if (sidebar) {
+        var backdrop = document.createElement('div');
+        backdrop.id = 'sidebar-backdrop';
+        backdrop.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:999;cursor:pointer;';
+        document.body.appendChild(backdrop);
+
+        var sidebarObserver = new MutationObserver(function () {
+            backdrop.style.display = (window.innerWidth <= 768 && sidebar.classList.contains('mobile-open'))
+                ? 'block' : 'none';
+        });
+        sidebarObserver.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
+
+        backdrop.addEventListener('click', function () {
+            sidebar.classList.remove('mobile-open');
+            backdrop.style.display = 'none';
+        });
+    }
+
+    // ─── 7. KEYBOARD SHORTCUTS ──────────────────────────────────────────────
+    document.addEventListener('keydown', function (e) {
+        var tag = document.activeElement ? document.activeElement.tagName : '';
+        var inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+                       || document.activeElement.isContentEditable);
+
+        if (e.key === '/' && !inInput && !e.ctrlKey && !e.metaKey) {
+            var searchInput = document.querySelector(
+                'input[name="search"], input[type="search"], input[placeholder*="earch"]'
+            );
+            if (searchInput) {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+        }
+
+        if ((e.key === 'n' || e.key === 'N') && !inInput && !e.ctrlKey && !e.metaKey) {
+            var addBtn = document.querySelector(
+                'a.btn-primary[href*="add"], a.btn-primary[href*="create"], a.btn-primary[href*="book"]'
+            );
+            if (addBtn) {
+                e.preventDefault();
+                addBtn.click();
+            }
+        }
+    });
+
+    // Run page init on first load
+    initPage();
 });
