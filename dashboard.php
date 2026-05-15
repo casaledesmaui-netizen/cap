@@ -266,11 +266,7 @@ $pat_trend = trend($patients_this_month, $patients_last_month);
                 </p>
             </div>
             <?php if ($unpaid_count > 0): ?>
-            <a href="modules/billing/list.php?status=unpaid" class="dash-alert">
-                <i class="bi bi-exclamation-circle-fill" style="font-size:1rem;flex-shrink:0;"></i>
-                <?php echo $unpaid_count; ?> unpaid bill<?php echo $unpaid_count != 1 ? 's' : ''; ?> &nbsp;·&nbsp; ₱<?php echo number_format($unpaid_total, 2); ?> outstanding
-                <i class="bi bi-arrow-right-short" style="margin-left:auto;font-size:1rem;"></i>
-            </a>
+            
             <?php endif; ?>
         </div>
 
