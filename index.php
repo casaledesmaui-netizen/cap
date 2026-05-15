@@ -64,9 +64,8 @@ function generate_captcha() {
     $_SESSION['captcha_n2']     = $n2;
 }
 
-if (!isset($_SESSION['captcha_answer']) || $_SERVER['REQUEST_METHOD'] === 'GET') {
-    generate_captcha();
-}
+if (!isset($_SESSION['captcha_answer'])) 
+{
 
 $view  = $_GET['view'] ?? 'login';
 $token = trim($_GET['token'] ?? '');
