@@ -134,22 +134,65 @@ $modules = $conn->query("SELECT DISTINCT module FROM audit_logs WHERE module IS 
                     </tbody>
                 </table>
             </div>
-            <?php if ($total_pages > 1): ?>
             <div class="card-footer d-flex justify-content-between align-items-center">
-                <small class="text-muted">Showing <?php echo count($logs); ?> of <?php echo $total; ?> entries</small>
-                <nav>
-                    <ul class="pagination pagination-sm mb-0">
-                        <?php for ($i = 1; $i <= $total_pages; $i++): ?>
-                        <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
-                            <a class="page-link" href="?page=<?php echo $i; ?>&search=<?php echo urlencode($search); ?>&module=<?php echo urlencode($filter); ?>">
-                                <?php echo $i; ?>
-                            </a>
-                        </li>
-                        <?php endfor; ?>
-                    </ul>
-                </nav>
-            </div>
+    <small class="text-muted">Showing <?php echo count($logs); ?> of <?php echo $total; ?> entries</small>
+    <?php if ($total_pages > 1): ?>
+    <nav>
+        <ul class="pagination pagination-sm mb-0">
+            <?php
+            $qs = '&search=' . urlencode($search) . '&module=' . urlencode($filter);
+            ?>
+            <!-- Previous -->
+            <li class="page-item <?php echo $page <= 1 ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?page=<?php echo $page - 1; ?><?php echo $qs; ?>">
+                    &laquo;
+                </a>
+            </li>
+
+            <?php
+            // Show smart page numbers with ellipsis
+            $range = 2;
+            $start = max(1, $page - $range);
+            $end   = min($total_pages, $page + $range);
+
+            if ($start > 1): ?>
+                <li class="page-item">
+                    <a class="page-link" href="?page=1<?php echo $qs; ?>">1</a>
+                </li>
+                <?php if ($start > 2): ?>
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                <?php endif; ?>
             <?php endif; ?>
+
+            <?php for ($i = $start; $i <= $end; $i++): ?>
+                <li class="page-item <?php echo $i === $page ? 'active' : ''; ?>">
+                    <a class="page-link" href="?page=<?php echo $i; ?><?php echo $qs; ?>">
+                        <?php echo $i; ?>
+                    </a>
+                </li>
+            <?php endfor; ?>
+
+            <?php if ($end < $total_pages): ?>
+                <?php if ($end < $total_pages - 1): ?>
+                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                <?php endif; ?>
+                <li class="page-item">
+                    <a class="page-link" href="?page=<?php echo $total_pages; ?><?php echo $qs; ?>">
+                        <?php echo $total_pages; ?>
+                    </a>
+                </li>
+            <?php endif; ?>
+
+            <!-- Next -->
+            <li class="page-item <?php echo $page >= $total_pages ? 'disabled' : ''; ?>">
+                <a class="page-link" href="?page=<?php echo $page + 1; ?><?php echo $qs; ?>">
+                    Next &raquo;
+                </a>
+            </li>
+        </ul>
+    </nav>
+    <?php endif; ?>
+</div>
         </div>
 
     </div>
