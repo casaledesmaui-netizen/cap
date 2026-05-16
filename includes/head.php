@@ -5,9 +5,18 @@ $title = ($page_title ?? 'Page') . ' | ' . APP_NAME;
 <meta http-equiv="Cache-Control" content="max-age=3600">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title><?php echo $title; ?></title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap">
+<style>
+/* Use system font — zero load time, looks identical */
+:root { 
+    --font-sans: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+}
+body { font-family: var(--font-sans); }
+</style>
+
+<!-- Prefetch pages on hover = instant clicks -->
+<script src="https://instant.page/5.2.0" type="module" 
+    integrity="sha384-jnZyxPjiipYXnSU0ygqeac2q7CVYMbh84q0uHVRRxEtvFPiQYbXWUorga2aqZJ0z">
+</script>
 <link rel="stylesheet" href="<?php echo BASE_URL; ?>assets/css/bootstrap.min.css">
 <link rel="stylesheet" href="<?php echo BASE_URL; ?>assets/css/bootstrap-icons.css">
 <link rel="stylesheet" href="<?php echo BASE_URL; ?>assets/css/style.css">
