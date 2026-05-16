@@ -29,3 +29,6 @@ body { font-family: var(--font-sans); }
     }
 })();
 </script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/nprogress@0.2.0/nprogress.min.css">
+<script src="https://cdn.jsdelivr.net/npm/nprogress@0.2.0/nprogress.min.js"></script>
+<script>NProgress.configure({ showSpinner: false, speed: 200 });</script>
