@@ -81,7 +81,7 @@ if ($view === 'otp_reset') {
             <h5 style="margin-top:16px;">Check your phone &amp; email</h5>
             <p style="color:var(--gray-500);font-size:0.9rem;">If an account with that username or email exists, an OTP has been sent.<br>Redirecting to login…</p>
         </div>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+        <link rel="stylesheet" href="assets/css/bootstrap-icons.css">
         </body></html><?php
         exit();
     }
