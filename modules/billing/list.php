@@ -248,15 +248,18 @@ $collection_rate = $totals['total_due'] > 0
 [data-theme="dark"] .collection-bar,
 [data-theme="dark"] .billing-filter-bar,
 [data-theme="dark"] .bill-table-wrap {
-    background: var(--gray-800);
-    border-color: var(--gray-700);
+    background: var(--gray-200);
+    border-color: var(--gray-300);
 }
-[data-theme="dark"] .bill-table-wrap thead tr { background: var(--gray-900); border-color: var(--gray-700); }
-[data-theme="dark"] .bill-table-wrap tbody tr { border-color: var(--gray-700); }
-[data-theme="dark"] .bill-table-wrap tbody tr:hover { background: rgba(37,99,235,0.08); }
-[data-theme="dark"] .bill-kpi-value { color: var(--white); }
-[data-theme="dark"] .collection-bar-track { background: var(--gray-700); }
-[data-theme="dark"] .method-badge { background: var(--gray-700); border-color: var(--gray-600); color: var(--gray-300); }
+[data-theme="dark"] .bill-table-wrap thead tr { background: var(--gray-100); border-color: var(--gray-300); }
+[data-theme="dark"] .bill-table-wrap thead th { color: var(--gray-700); }
+[data-theme="dark"] .bill-table-wrap tbody tr { border-color: var(--gray-300); }
+[data-theme="dark"] .bill-table-wrap tbody tr:hover { background: rgba(77,134,240,0.08); }
+[data-theme="dark"] .bill-kpi-label { color: var(--gray-600); }
+[data-theme="dark"] .bill-kpi-value { color: var(--gray-900); }
+[data-theme="dark"] .bill-kpi-sub { color: var(--gray-500); }
+[data-theme="dark"] .collection-bar-track { background: var(--gray-300); }
+[data-theme="dark"] .method-badge { background: var(--gray-300); border-color: var(--gray-400); color: var(--gray-700); }
 
 @media (max-width: 900px) {
     .bill-kpi-grid { grid-template-columns: repeat(2, 1fr); }
