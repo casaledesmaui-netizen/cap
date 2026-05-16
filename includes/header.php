@@ -9,11 +9,16 @@ $current_user_name = $current_user_name ?? 'User';
 $current_user_role = $current_user_role ?? 'staff';
 
 $initials    = strtoupper(substr($current_user_name, 0, 1));
-$notif_count = 0;
+$notif_count   = 0;
 $recent_notifs = [];
 
-if (isset($conn)) {
-    // Unread count badge
+// Cache notifications in session for 30 seconds
+// This means DB is only hit once every 30 seconds instead of on every single page load
+$cache_key  = 'notif_cache_' . $current_user_id;
+$cache_time = $_SESSION[$cache_key . '_time'] ?? 0;
+
+if (isset($conn) && (time() - $cache_time) > 30) {
+    // Cache expired — hit the DB and store results
     $nr = $conn->prepare("SELECT COUNT(*) as c FROM notifications WHERE (user_id = ? OR user_id IS NULL) AND is_read = 0");
     if ($nr) {
         $nr->bind_param('i', $current_user_id);
@@ -21,7 +26,6 @@ if (isset($conn)) {
         $notif_count = (int) $nr->get_result()->fetch_assoc()['c'];
         $nr->close();
     }
-    // Recent 8 notifications for the dropdown
     $nq = $conn->prepare("SELECT id, type, title, message, link, is_read, created_at FROM notifications WHERE (user_id = ? OR user_id IS NULL) ORDER BY created_at DESC LIMIT 8");
     if ($nq) {
         $nq->bind_param('i', $current_user_id);
@@ -29,6 +33,14 @@ if (isset($conn)) {
         $recent_notifs = $nq->get_result()->fetch_all(MYSQLI_ASSOC);
         $nq->close();
     }
+    // Save to session cache
+    $_SESSION[$cache_key . '_time']   = time();
+    $_SESSION[$cache_key . '_count']  = $notif_count;
+    $_SESSION[$cache_key . '_recent'] = $recent_notifs;
+} else {
+    // Use cached values — zero DB queries!
+    $notif_count   = $_SESSION[$cache_key . '_count']  ?? 0;
+    $recent_notifs = $_SESSION[$cache_key . '_recent'] ?? [];
 }
 ?>
 <div id="topbar">
