@@ -466,7 +466,7 @@ $pb_returning   = json_encode(array_column($patient_breakdown, 'returning_count'
                     <span class="an-card-head-sub"><?php echo $range_label; ?> — peaks &amp; busy days</span>
                 </div>
                 <div class="an-card-body">
-                    <div style="position:relative;height:200px;">
+                    <div style="position:relative;height:130px;">
                         <canvas id="dailyApptChart"></canvas>
                     </div>
                 </div>
