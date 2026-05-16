@@ -157,7 +157,7 @@ $appointments = $conn->query("
         <div style="background:var(--white);border-radius:14px;border:var(--border);overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.06);">
             <table style="width:100%;border-collapse:collapse;" id="appointmentsTable">
                 <thead>
-                    <tr style="background:linear-gradient(to bottom,#f8fafc,var(--gray-100));border-bottom:2px solid var(--gray-200);">
+                   <tr style="background:linear-gradient(to bottom,var(--gray-100),var(--gray-200));border-bottom:2px solid var(--gray-300);">
                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-600);text-align:left;">Code</th>
                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-600);text-align:left;">Patient</th>
                        <th style="padding:12px 16px;font-size:0.7rem;font-weight:800;text-transform:uppercase;letter-spacing:0.07em;color:var(--gray-600);text-align:left;">Service</th>
