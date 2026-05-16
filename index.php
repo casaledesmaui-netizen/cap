@@ -359,7 +359,7 @@ if ($view === 'otp_reset') {
         background-color: #1e3a8a;
         background-image:
             linear-gradient(135deg, rgba(15,23,42,0.72) 0%, rgba(30,64,175,0.65) 100%),
-            url('assets/images/cas.jpg');
+            url('assets/images/cap.jpg');
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
