@@ -458,14 +458,14 @@ if ($view === 'otp_reset') {
     /* ── DARK MODE ──────────────────────────────────────────── */
     /* Keep the background image visible in dark mode, just darken the overlay */
     [data-theme="dark"] body.login-page {
-        background-color: #0f172a;
-        background-image:
-            linear-gradient(135deg, rgba(5,8,20,0.88) 0%, rgba(10,20,50,0.85) 100%),
-            url('assets/images/cas.jpg');
-        background-size: cover;
-        background-position: center;
-        background-attachment: fixed;
-    }
+    background-color: #0f172a;
+    background-image:
+        linear-gradient(135deg, rgba(5,8,20,0.55) 0%, rgba(10,20,50,0.50) 100%),
+        url('assets/images/cap.jpg');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+  }
     [data-theme="dark"] .login-form-panel { background: #1e293b; }
     [data-theme="dark"] .form-heading     { color: #f1f5f9; }
     [data-theme="dark"] .form-subheading  { color: #64748b; }
