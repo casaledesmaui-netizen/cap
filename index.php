@@ -4,8 +4,6 @@
 // Features: Math CAPTCHA, login attempt limiting, OTP password reset
 // ============================================================
 
-// Session must be named and started BEFORE config.php sets the exception handler.
-// IMPORTANT: session name and ini_set values must be IDENTICAL to auth.php.
 ini_set('session.cookie_httponly',  1);
 ini_set('session.use_strict_mode',  1);
 ini_set('session.cookie_samesite', 'Lax');
@@ -19,7 +17,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once 'includes/config.php';
 
-// Already logged in → go to dashboard
 if (isset($_SESSION['user_id'])) {
     header('Location: dashboard.php');
     exit();
@@ -27,9 +24,6 @@ if (isset($_SESSION['user_id'])) {
 
 require_once 'includes/db.php';
 
-// validate_password() is normally defined in auth.php, but index.php cannot
-// include auth.php (it starts a session guard that conflicts with the login page).
-// Defined here so the password-reset flow (view=reset) does not crash.
 function validate_password(string $pw): ?string {
     if (strlen($pw) < 8 || strlen($pw) > 18)
         return 'Password must be between 8 and 18 characters.';
@@ -44,9 +38,6 @@ function validate_password(string $pw): ?string {
     return null;
 }
 
-// ============================================================
-// CONSTANTS
-// ============================================================
 define('MAX_LOGIN_ATTEMPTS', 5);
 define('LOCKOUT_SECONDS',    300);
 define('RESET_TOKEN_TTL',    600);
@@ -54,7 +45,7 @@ define('OTP_TTL',            300);
 define('OTP_MAX_ATTEMPTS',     5);
 
 // ============================================================
-// MATH CAPTCHA
+// MATH CAPTCHA — only generate once per session (bug fix)
 // ============================================================
 function generate_captcha() {
     $n1 = rand(1, 9);
@@ -75,14 +66,11 @@ $error   = '';
 $success = '';
 
 // ============================================================
-// VIEW: OTP VERIFY — PASSWORD RESET ONLY
+// VIEW: OTP VERIFY
 // ============================================================
 if ($view === 'otp_reset') {
 
-    // No pending OTP — could be a real user who was redirected, or a non-existent user
-    // Either way show the same waiting UI (prevents user enumeration via redirect behavior)
     if (empty($_SESSION['pending_reset_otp'])) {
-        // Show neutral "check your contacts" message then bounce back after a moment
         ?><!DOCTYPE html><html lang="en"><head>
         <meta charset="UTF-8"><meta http-equiv="refresh" content="4;url=index.php">
         <title>Check your contacts | <?php echo APP_NAME; ?></title>
@@ -99,8 +87,6 @@ if ($view === 'otp_reset') {
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-
-        // Handle resend request
         if (isset($_POST['resend_otp'])) {
             unset($_SESSION['pending_reset_otp'], $_SESSION['otp_reset_attempts']);
             header('Location: index.php?view=forgot'); exit();
@@ -123,7 +109,6 @@ if ($view === 'otp_reset') {
             $remaining = OTP_MAX_ATTEMPTS - $_SESSION['otp_reset_attempts'];
             $error = "Incorrect OTP. $remaining attempt(s) remaining.";
         } else {
-            // ✅ OTP correct — proceed to reset password
             unset($_SESSION['pending_reset_otp'], $_SESSION['otp_reset_attempts']);
             $token = $pending['token'];
             header('Location: index.php?view=reset&token=' . urlencode($token)); exit();
@@ -182,8 +167,7 @@ if ($view === 'otp_reset') {
 // ============================================================
 } elseif ($view === 'forgot') {
 
-    // Ensure reset_token / reset_expires columns exist (safe for MySQL 5.x / MariaDB)
-    $db_res = $conn->query("SELECT DATABASE()");
+    $db_res  = $conn->query("SELECT DATABASE()");
     $db_name = $db_res ? $db_res->fetch_row()[0] : '';
     if ($db_name) {
         $r1 = $conn->query("SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA='".addslashes($db_name)."' AND TABLE_NAME='users' AND COLUMN_NAME='reset_token' LIMIT 1");
@@ -200,7 +184,7 @@ if ($view === 'otp_reset') {
         } else {
             $stmt = $conn->prepare("SELECT id, full_name, email, phone FROM users WHERE (username = ? OR email = ?) AND is_active = 1 LIMIT 1");
             if (!$stmt) {
-                $error = 'DB Error: ' . $conn->error; // <--- CHANGED THIS LINE
+                $error = 'DB Error: ' . $conn->error;
             } else {
                 $stmt->bind_param('ss', $identifier, $identifier);
                 $stmt->execute();
@@ -234,11 +218,7 @@ if ($view === 'otp_reset') {
                         $error = 'Failed to generate reset token. Please try again.';
                     }
                 }
-                // Always show the same message whether account exists or not (prevents user enumeration)
                 if (empty($error)) {
-                    $success = 'If that account exists, an OTP has been sent to the registered phone and email.';
-                    // Redirect to a neutral "check your contact" page so behavior is identical
-                    // regardless of whether the account was found
                     header('Location: index.php?view=otp_reset'); exit();
                 }
             }
@@ -246,7 +226,7 @@ if ($view === 'otp_reset') {
     }
 
 // ============================================================
-// VIEW: LOGIN (default) — goes straight to dashboard, no OTP
+// VIEW: LOGIN (default)
 // ============================================================
 } else {
 
@@ -255,19 +235,14 @@ if ($view === 'otp_reset') {
         $password = $_POST['password'] ?? '';
         $math_ans = trim($_POST['math_answer'] ?? '');
 
-        // ── DEFENSIVE PROGRAMMING: HONEYPOT FIELD ──────────────────────────
-        // A hidden input named 'website' is invisible to humans (CSS display:none).
-        // Bots auto-fill every field — if this arrives non-empty, it's a bot. Silently reject.
+        // Honeypot bot detection
         if (!empty($_POST['website'])) {
-            // Log the bot attempt then die silently — no error message, no info leak
             error_log('[HONEYPOT] Bot detected from IP: ' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-            sleep(3); // waste the bot's time
+            sleep(3);
             exit();
         }
 
-        // ── DEFENSIVE PROGRAMMING: hCAPTCHA VERIFICATION ───────────────────
-        // Verify the hCaptcha token with Hcaptcha's API before checking credentials.
-        // If HCAPTCHA_SECRET is not set (local dev without key), skip gracefully.
+        // hCaptcha verification (only runs if keys are set)
         $hcaptcha_secret = $_ENV['HCAPTCHA_SECRET'] ?? '';
         if (!empty($hcaptcha_secret)) {
             $hcaptcha_token = $_POST['h-captcha-response'] ?? '';
@@ -323,18 +298,13 @@ if ($view === 'otp_reset') {
                 $stmt->close();
 
                 if ($user && password_verify($password, $user['password'])) {
-                    // Clear leftover temporary session keys
                     unset($_SESSION['login_attempts'], $_SESSION['last_fail_time'],
                           $_SESSION['captcha_answer'], $_SESSION['captcha_n1'], $_SESSION['captcha_n2']);
 
-                    // Write user identity into the session directly.
-                    // DO NOT call session_regenerate_id() here — on Windows/Laragon it
-                    // causes a race condition where the new session file isn't flushed
-                    // before the browser's next request, making every click log you out.
-                    $_SESSION['user_id']      = $user['id'];
-                    $_SESSION['full_name']    = $user['full_name'];
-                    $_SESSION['username']     = $user['username'];
-                    $_SESSION['role']         = $user['role'];
+                    $_SESSION['user_id']       = $user['id'];
+                    $_SESSION['full_name']     = $user['full_name'];
+                    $_SESSION['username']      = $user['username'];
+                    $_SESSION['role']          = $user['role'];
                     $_SESSION['last_activity'] = time();
 
                     log_action($conn, $user['id'], $user['full_name'], 'Logged In', 'auth', $user['id'],
@@ -343,11 +313,7 @@ if ($view === 'otp_reset') {
                     header('Location: dashboard.php');
                     exit();
                 } else {
-                    // ── DEFENSIVE PROGRAMMING: TARPITTING ──────────────────────────────
-                    // Add a 2-second delay on every failed login attempt.
-                    // A human barely notices. A bot trying 1000 passwords now takes 33 minutes.
-                    sleep(2);
-
+                    sleep(2); // tarpitting — slows brute-force bots
                     $_SESSION['login_attempts'] = $attempts + 1;
                     $_SESSION['last_fail_time'] = time();
                     $remaining = MAX_LOGIN_ATTEMPTS - $_SESSION['login_attempts'];
@@ -386,24 +352,61 @@ if ($view === 'otp_reset') {
     })();
     </script>
     <style>
-    /* ── LOGIN PAGE REDESIGN ───────────────────────────────── */
+    /* ── LOGIN PAGE ─────────────────────────────────────────── */
     body.login-page {
-        background: #f0f4ff;
         display: flex; align-items: center; justify-content: center;
         min-height: 100vh; margin-left: 0;
+        background-color: #1e3a8a;
+        background-image:
+            linear-gradient(135deg, rgba(15,23,42,0.72) 0%, rgba(30,64,175,0.65) 100%),
+            url('assets/images/cas.jpg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        position: relative;
+        overflow: hidden;
     }
+
+    /* Animated glow bubbles */
+    body.login-page::before {
+        content: '';
+        position: fixed; top: -180px; left: -180px;
+        width: 520px; height: 520px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(37,99,235,0.18) 0%, transparent 70%);
+        pointer-events: none;
+        animation: floatBubble1 8s ease-in-out infinite;
+    }
+    body.login-page::after {
+        content: '';
+        position: fixed; bottom: -150px; right: -150px;
+        width: 420px; height: 420px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(14,165,233,0.14) 0%, transparent 70%);
+        pointer-events: none;
+        animation: floatBubble2 10s ease-in-out infinite;
+    }
+    @keyframes floatBubble1 {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50%       { transform: translate(30px, 20px) scale(1.05); }
+    }
+    @keyframes floatBubble2 {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        50%       { transform: translate(-20px, -30px) scale(1.04); }
+    }
+
     .login-wrap {
         display: flex; width: 100%; max-width: 860px;
         min-height: 540px; border-radius: 20px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        box-shadow: 0 20px 60px rgba(0,0,0,0.35);
         overflow: hidden;
         animation: fadeUp 0.4s ease;
+        position: relative; z-index: 1;
     }
     @keyframes fadeUp {
         from { opacity:0; transform:translateY(24px); }
         to   { opacity:1; transform:translateY(0); }
     }
-    /* Left panel */
+
+    /* Left branding panel */
     .login-panel {
         width: 42%; background: linear-gradient(160deg,#1d4ed8 0%,#1e40af 50%,#1e3a8a 100%);
         display: flex; flex-direction: column; align-items: center;
@@ -411,67 +414,68 @@ if ($view === 'otp_reset') {
     }
     .login-panel::before {
         content:''; position:absolute; width:280px; height:280px;
-        background:rgba(255,255,255,0.05); border-radius:50%;
-        top:-60px; left:-80px;
+        background:rgba(255,255,255,0.05); border-radius:50%; top:-60px; left:-80px;
     }
     .login-panel::after {
         content:''; position:absolute; width:200px; height:200px;
-        background:rgba(255,255,255,0.05); border-radius:50%;
-        bottom:-50px; right:-60px;
+        background:rgba(255,255,255,0.05); border-radius:50%; bottom:-50px; right:-60px;
     }
     .panel-icon {
-        width: 72px; height: 72px; background: rgba(255,255,255,0.15);
-        border-radius: 20px; display: flex; align-items: center;
-        justify-content: center; font-size: 36px; margin-bottom: 24px;
-        backdrop-filter: blur(4px);
+        width:72px; height:72px; background:rgba(255,255,255,0.15);
+        border-radius:20px; display:flex; align-items:center;
+        justify-content:center; font-size:36px; margin-bottom:24px;
+        backdrop-filter:blur(4px);
     }
     .panel-title {
-        font-size: 1.6rem; font-weight: 800; color: #fff;
-        text-align: center; margin-bottom: 10px; letter-spacing: -0.02em;
+        font-size:1.6rem; font-weight:800; color:#fff;
+        text-align:center; margin-bottom:10px; letter-spacing:-0.02em;
     }
     .panel-subtitle {
-        font-size: 0.82rem; color: rgba(255,255,255,0.65);
-        text-align: center; line-height: 1.6;
+        font-size:0.82rem; color:rgba(255,255,255,0.65);
+        text-align:center; line-height:1.6;
     }
-    .panel-dots {
-        display: flex; gap: 7px; margin-top: 32px;
-    }
+    .panel-dots { display:flex; gap:7px; margin-top:32px; }
     .panel-dots span {
-        width: 8px; height: 8px; border-radius: 50%;
-        background: rgba(255,255,255,0.3);
+        width:8px; height:8px; border-radius:50%;
+        background:rgba(255,255,255,0.3);
     }
-    .panel-dots span.active { background: #fff; width: 22px; border-radius: 4px; }
+    .panel-dots span.active { background:#fff; width:22px; border-radius:4px; }
 
-    /* Right panel — form */
+    /* Right form panel */
     .login-form-panel {
-        flex: 1; background: #fff; padding: 48px 44px;
-        display: flex; flex-direction: column; justify-content: center;
+        flex:1; background:#fff; padding:48px 44px;
+        display:flex; flex-direction:column; justify-content:center;
     }
-    .form-heading {
-        font-size: 1.3rem; font-weight: 700; color: #111827; margin-bottom: 4px;
-    }
-    .form-subheading {
-        font-size: 0.8rem; color: #9ca3af; margin-bottom: 28px;
-    }
+    .form-heading  { font-size:1.3rem; font-weight:700; color:#111827; margin-bottom:4px; }
+    .form-subheading { font-size:0.8rem; color:#9ca3af; margin-bottom:28px; }
 
-    /* Responsive */
     @media (max-width: 640px) {
-        .login-panel { display: none; }
-        .login-wrap  { max-width: 420px; border-radius: 16px; }
-        .login-form-panel { padding: 36px 28px; }
+        .login-panel { display:none; }
+        .login-wrap  { max-width:420px; border-radius:16px; }
+        .login-form-panel { padding:36px 28px; }
     }
 
-    [data-theme="dark"] body.login-page { background: #0f172a; }
+    /* ── DARK MODE ──────────────────────────────────────────── */
+    /* Keep the background image visible in dark mode, just darken the overlay */
+    [data-theme="dark"] body.login-page {
+        background-color: #0f172a;
+        background-image:
+            linear-gradient(135deg, rgba(5,8,20,0.88) 0%, rgba(10,20,50,0.85) 100%),
+            url('assets/images/cas.jpg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+    }
     [data-theme="dark"] .login-form-panel { background: #1e293b; }
-    [data-theme="dark"] .form-heading { color: #f1f5f9; }
-    [data-theme="dark"] .form-subheading { color: #64748b; }
+    [data-theme="dark"] .form-heading     { color: #f1f5f9; }
+    [data-theme="dark"] .form-subheading  { color: #64748b; }
     </style>
 </head>
 <body class="login-page">
 
 <div class="login-wrap">
 
-    <!-- ── LEFT BRANDING PANEL ─────────────────────────── -->
+    <!-- LEFT BRANDING PANEL -->
     <div class="login-panel">
         <div class="panel-icon">🦷</div>
         <div class="panel-title">DentalCare</div>
@@ -483,14 +487,12 @@ if ($view === 'otp_reset') {
         </div>
     </div>
 
-    <!-- ── RIGHT FORM PANEL ────────────────────────────── -->
+    <!-- RIGHT FORM PANEL -->
     <div class="login-form-panel">
 
     <?php if ($view === 'otp_reset'): ?>
-    <!-- OTP VERIFY VIEW -->
     <div class="form-heading"><i class="bi bi-shield-lock" style="color:#1d4ed8;"></i> Verify OTP</div>
     <div class="form-subheading">Enter the 6-digit code sent to your phone and email</div>
-
     <?php if ($error): ?>
         <div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
@@ -517,8 +519,8 @@ if ($view === 'otp_reset') {
             <i class="bi bi-arrow-repeat"></i> Request New OTP
         </a>
     </div>
+
     <?php elseif ($view === 'forgot'): ?>
-    <!-- FORGOT PASSWORD VIEW -->
     <div class="form-heading"><i class="bi bi-key" style="color:#1d4ed8;"></i> Forgot Password</div>
     <div class="form-subheading">Enter your username or email to receive an OTP</div>
     <?php if ($error): ?>
@@ -548,14 +550,11 @@ if ($view === 'otp_reset') {
     </p>
 
     <?php elseif ($view === 'reset'): ?>
-    <!-- RESET PASSWORD VIEW -->
     <div class="form-heading"><i class="bi bi-lock-fill" style="color:#1d4ed8;"></i> Set New Password</div>
     <div class="form-subheading">Choose a strong new password for your account</div>
-
     <?php if ($error): ?>
         <div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
-
     <?php
     $now = date('Y-m-d H:i:s');
     $chk = $conn->prepare("SELECT id FROM users WHERE reset_token = ? AND reset_expires > ? AND is_active = 1 LIMIT 1");
@@ -564,7 +563,6 @@ if ($view === 'otp_reset') {
     $token_valid = (bool)$chk->get_result()->fetch_assoc();
     $chk->close();
     ?>
-
     <?php if (!$token_valid && !$error): ?>
         <div class="alert alert-danger">
             <i class="bi bi-x-circle-fill"></i>
@@ -597,17 +595,16 @@ if ($view === 'otp_reset') {
         </button>
     </form>
     <?php endif; ?>
-
     <p style="text-align:center;margin-top:16px;">
         <a href="index.php" style="font-size:0.82rem;color:#6b7280;">
             <i class="bi bi-arrow-left"></i> Back to Login
         </a>
     </p>
+
     <?php else: ?>
-    <!-- LOGIN VIEW (default) -->
+    <!-- LOGIN VIEW -->
     <div class="form-heading">Welcome back 👋</div>
     <div class="form-subheading">Sign in to your admin account</div>
-
     <?php if ($error): ?>
         <div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> <?php echo htmlspecialchars($error); ?></div>
     <?php endif; ?>
@@ -617,7 +614,6 @@ if ($view === 'otp_reset') {
     <?php if (isset($_GET['timeout'])): ?>
         <div class="alert alert-warning"><i class="bi bi-clock"></i> Your session expired. Please log in again.</div>
     <?php endif; ?>
-
     <?php
     $attempts  = $_SESSION['login_attempts']  ?? 0;
     $last_fail = $_SESSION['last_fail_time']  ?? 0;
@@ -632,9 +628,7 @@ if ($view === 'otp_reset') {
     <?php endif; ?>
 
     <form method="POST" action="index.php" <?php echo $locked ? 'style="opacity:0.5;pointer-events:none;"' : ''; ?>>
-
-        <!-- ── HONEYPOT FIELD (invisible to humans, bots fill it in) ── -->
-        <!-- Defensive Programming: Bot Detection via Honeypot -->
+        <!-- Honeypot — invisible to humans, bots fill it -->
         <div style="display:none;visibility:hidden;position:absolute;left:-9999px;" aria-hidden="true">
             <label for="website">Leave this empty</label>
             <input type="text" name="website" id="website" tabindex="-1" autocomplete="off">
@@ -680,7 +674,6 @@ if ($view === 'otp_reset') {
         </div>
 
         <?php if (!empty($_ENV['HCAPTCHA_SITE_KEY'])): ?>
-        <!-- ── hCAPTCHA WIDGET (Defensive Programming: Human Verification) ── -->
         <div style="margin-bottom:18px;">
             <div class="h-captcha" data-sitekey="<?php echo htmlspecialchars($_ENV['HCAPTCHA_SITE_KEY']); ?>"></div>
         </div>
@@ -696,7 +689,6 @@ if ($view === 'otp_reset') {
             <i class="bi bi-key"></i> Forgot your password?
         </a>
     </p>
-
     <?php endif; ?>
 
     <p style="text-align:center;font-size:0.72rem;color:#d1d5db;margin-top:24px;border-top:1px solid #f3f4f6;padding-top:16px;">
@@ -707,7 +699,6 @@ if ($view === 'otp_reset') {
 </div><!-- end .login-wrap -->
 
 <script>
-// Password show/hide — login
 var togPw = document.getElementById('togglePw');
 if (togPw) togPw.addEventListener('click', function() {
     var inp = document.getElementById('passwordInput');
@@ -717,7 +708,6 @@ if (togPw) togPw.addEventListener('click', function() {
     this.style.cssText = 'position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#9ca3af;cursor:pointer;';
 });
 
-// Password show/hide — reset
 var togNew = document.getElementById('toggleNew');
 if (togNew) togNew.addEventListener('click', function() {
     var inp = document.getElementById('newPassInput');
@@ -727,7 +717,6 @@ if (togNew) togNew.addEventListener('click', function() {
     this.style.cssText = 'position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#9ca3af;cursor:pointer;';
 });
 
-// Password match checker
 var confPass = document.getElementById('confPassInput');
 var newPass  = document.getElementById('newPassInput');
 var matchMsg = document.getElementById('matchMsg');
