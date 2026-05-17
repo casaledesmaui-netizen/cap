@@ -194,7 +194,7 @@ function initPage() {
 
     // Update sidebar active link highlight
     function updateActiveLink(url) {
-        sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
+        sidebar.querySelectorAll('a[href]').forEach(function (a) {
             var href = a.getAttribute('href');
             if (!href) return;
             // Match by path ending — e.g. "list.php" in href vs current url
@@ -251,8 +251,20 @@ function initPage() {
             curMain.scrollTo({ top: 0 });
 
             // Remove stale breadcrumb so initPage() can rebuild it
+           // Remove stale breadcrumb so initPage() can rebuild it
             var oldBc = document.getElementById('breadcrumb');
             if (oldBc) oldBc.remove();
+
+            // Re-execute inline scripts (charts, calendar, etc.)
+            curMain.querySelectorAll('script').forEach(function (oldScript) {
+                var newScript = document.createElement('script');
+                Array.from(oldScript.attributes).forEach(function (attr) {
+                    newScript.setAttribute(attr.name, attr.value);
+                });
+                newScript.textContent = oldScript.textContent;
+                oldScript.replaceWith(newScript);
+            });
+
 
             // Re-run all page init for the new content
             initPage();
@@ -270,7 +282,7 @@ function initPage() {
 
     // Intercept sidebar nav link clicks only
     sidebar.addEventListener('click', function (e) {
-        var link = e.target.closest('a.nav-link');
+        var link = e.target.closest('a[href]');
         if (!link) return;
 
         var href = link.getAttribute('href');
