@@ -1,364 +1,323 @@
-/* app.js — Global JavaScript loaded on every admin page.
-   Handles: alert auto-dismiss, confirm dialogs, mobile sidebar overlay,
-   table row counts, auto-submit filters, back-to-top, keyboard shortcuts,
-   empty state upgrades, active breadcrumb, and PJAX navigation. */
+/* app.js — Global JS for every admin page.
+   v2: script re-execution after PJAX, Chart.js cleanup, AbortController,
+       no event-listener leaks, delegated confirm dialogs, debounced scroll. */
 
-// ─── PAGE INIT (runs on first load AND after every PJAX swap) ───────────────
+'use strict';
+
+// ─── GLOBAL STATE ─────────────────────────────────────────────────────────
+var _scrollHandler = null;
+var _bttEl         = null;
+var _chartRegistry = {};
+
+// ─── UTILITIES ────────────────────────────────────────────────────────────
+function debounce(fn, ms) {
+    var t;
+    return function () { clearTimeout(t); t = setTimeout(fn, ms); };
+}
+
+function runScripts(container) {
+    container.querySelectorAll('script').forEach(function (old) {
+        var fresh = document.createElement('script');
+        Array.from(old.attributes).forEach(function (a) { fresh.setAttribute(a.name, a.value); });
+        fresh.textContent = old.textContent;
+        old.parentNode.replaceChild(fresh, old);
+    });
+}
+
+function destroyChartsIn(container) {
+    container.querySelectorAll('canvas').forEach(function (canvas) {
+        var id = canvas.id;
+        if (id && _chartRegistry[id]) {
+            try { _chartRegistry[id].destroy(); } catch (e) {}
+            delete _chartRegistry[id];
+        }
+    });
+    if (window.Chart && Chart.instances) {
+        Object.values(Chart.instances).forEach(function (chart) {
+            if (container.contains(chart.canvas)) {
+                try { chart.destroy(); } catch (e) {}
+            }
+        });
+    }
+}
+
+// ─── PAGE INIT ────────────────────────────────────────────────────────────
 function initPage() {
 
-    // ─── 1. AUTO-DISMISS ALERTS ─────────────────────────────────────────────
-    document.querySelectorAll('.alert:not(.alert-permanent)').forEach(function (alert) {
+    // 1. AUTO-DISMISS ALERTS
+    document.querySelectorAll('.alert:not(.alert-permanent):not([data-timed])').forEach(function (el) {
+        el.setAttribute('data-timed', '1');
         setTimeout(function () {
-            alert.style.transition = 'opacity 0.4s ease';
-            alert.style.opacity = '0';
-            setTimeout(function () { alert.remove(); }, 400);
+            el.style.transition = 'opacity 0.4s ease';
+            el.style.opacity = '0';
+            setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 420);
         }, 5000);
     });
 
-    // ─── 2. CONFIRM DIALOGS ─────────────────────────────────────────────────
-    document.querySelectorAll('[data-confirm]').forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-            if (!confirm(this.dataset.confirm)) e.preventDefault();
+    // 2. CONFIRM DIALOGS — delegated, set once only
+    if (!document._confirmDelegated) {
+        document._confirmDelegated = true;
+        document.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-confirm]');
+            if (btn && !confirm(btn.dataset.confirm)) e.preventDefault();
         });
-    });
+    }
 
+    // 3. ROW COUNT BADGES
     document.querySelectorAll('.card').forEach(function (card) {
+        if (card.querySelector('.row-count-badge')) return;
         var tbody = card.querySelector('tbody');
         if (!tbody) return;
-
-        var rows = Array.from(tbody.querySelectorAll('tr')).filter(function (tr) {
-            return !tr.querySelector('td[colspan]');
-        });
-        var count = rows.length;
-
-        var cardHeader = card.querySelector('.card-header');
-        if (cardHeader && !cardHeader.querySelector('.row-count-badge')) {
+        var count = Array.from(tbody.querySelectorAll('tr'))
+            .filter(function (tr) { return !tr.querySelector('td[colspan]'); }).length;
+        var header = card.querySelector('.card-header');
+        if (header) {
             var badge = document.createElement('span');
             badge.className = 'row-count-badge';
             badge.textContent = count + ' result' + (count !== 1 ? 's' : '');
-            cardHeader.appendChild(badge);
+            header.appendChild(badge);
         }
     });
 
-    // ─── 5. AUTO-SUBMIT FILTER DROPDOWNS ────────────────────────────────────
-    document.querySelectorAll('form[method="GET"] select').forEach(function (sel) {
-        sel.addEventListener('change', function () {
-            this.closest('form').submit();
-        });
+    // 4. AUTO-SUBMIT FILTER SELECTS
+    document.querySelectorAll('form[method="GET"] select:not([data-no-auto])').forEach(function (sel) {
+        if (sel._autoSubmit) return;
+        sel._autoSubmit = true;
+        sel.addEventListener('change', function () { this.closest('form').submit(); });
     });
 
-    // ─── 6. BACK-TO-TOP BUTTON ──────────────────────────────────────────────
-    var btt = document.getElementById('back-to-top');
-    if (!btt) {
-        btt = document.createElement('button');
-        btt.id = 'back-to-top';
-        btt.innerHTML = '<i class="bi bi-arrow-up"></i>';
-        btt.title = 'Back to top';
-        btt.setAttribute('aria-label', 'Back to top');
-        document.body.appendChild(btt);
+    // 5. BACK-TO-TOP
+    if (!_bttEl) {
+        _bttEl = document.createElement('button');
+        _bttEl.id = 'back-to-top';
+        _bttEl.innerHTML = '<i class="bi bi-arrow-up"></i>';
+        _bttEl.title = 'Back to top';
+        _bttEl.setAttribute('aria-label', 'Back to top');
+        document.body.appendChild(_bttEl);
+        _bttEl.addEventListener('click', function () {
+            var el = document.querySelector('.main-content');
+            (el || window).scrollTo({ top: 0, behavior: 'smooth' });
+        });
     }
-
     var scrollEl = document.querySelector('.main-content') || window;
-
-    function onScroll() {
-        var top = (scrollEl === window) ? window.scrollY : scrollEl.scrollTop;
-        btt.classList.toggle('btt-visible', top > 280);
+    if (_scrollHandler) {
+        scrollEl.removeEventListener('scroll', _scrollHandler);
+        window.removeEventListener('scroll', _scrollHandler);
     }
+    _scrollHandler = debounce(function () {
+        var top = (scrollEl === window) ? window.scrollY : scrollEl.scrollTop;
+        _bttEl.classList.toggle('btt-visible', top > 300);
+    }, 50);
+    scrollEl.addEventListener('scroll', _scrollHandler, { passive: true });
 
-    scrollEl.removeEventListener('scroll', onScroll);
-    scrollEl.addEventListener('scroll', onScroll, { passive: true });
-
-    btt.onclick = function () {
-        scrollEl.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-
-    // ─── 7. KEYBOARD SHORTCUTS ──────────────────────────────────────────────
-    var firstSearch = document.querySelector('input[name="search"], input[type="search"]');
-    if (firstSearch && !firstSearch.dataset.hintAdded) {
-        firstSearch.dataset.hintAdded = '1';
+    // 6. SEARCH HINT
+    var searchEl = document.querySelector('input[name="search"], input[type="search"]');
+    if (searchEl && !searchEl.dataset.hintAdded) {
+        searchEl.dataset.hintAdded = '1';
         var hint = document.createElement('span');
         hint.className = 'kbd-hint';
         hint.innerHTML = 'Press <kbd>/</kbd> to search';
-        var parent = firstSearch.closest('.input-group') || firstSearch.parentNode;
-        if (parent && parent.parentNode) {
-            parent.parentNode.insertBefore(hint, parent.nextSibling);
-        }
+        var par = searchEl.closest('.input-group') || searchEl.parentNode;
+        if (par && par.parentNode) par.parentNode.insertBefore(hint, par.nextSibling);
     }
 
-    // ─── 8. IMPROVED EMPTY STATES ───────────────────────────────────────────
-    var emptyConfig = {
-        'No patients yet.'         : { icon: 'bi-people',          msg: 'No patients yet',          hint: 'Add your first patient to get started.' },
-        'No appointments found.'   : { icon: 'bi-calendar-x',      msg: 'No appointments found',    hint: 'Try adjusting your filters.' },
-        'No bills found.'          : { icon: 'bi-receipt',         msg: 'No bills found',           hint: 'Bills will appear here once created.' },
-        'No dental records found.' : { icon: 'bi-journal-medical', msg: 'No dental records',        hint: 'No treatment records have been added yet.' },
-        'No logs found.'           : { icon: 'bi-shield-check',    msg: 'No activity yet',          hint: 'Audit logs will appear here as actions are taken.' },
-        'No users found.'          : { icon: 'bi-person-x',        msg: 'No users found',           hint: 'No users match your search.' }
+    // 7. IMPROVED EMPTY STATES
+    var emptyMap = {
+        'no patients':       { icon: 'bi-people',          msg: 'No patients yet',       hint: 'Add your first patient to get started.' },
+        'no appointments':   { icon: 'bi-calendar-x',      msg: 'No appointments found', hint: 'Try adjusting your filters.' },
+        'no bills':          { icon: 'bi-receipt',          msg: 'No bills found',        hint: 'Bills will appear here once created.' },
+        'no dental records': { icon: 'bi-journal-medical',  msg: 'No dental records',     hint: 'No treatment records have been added yet.' },
+        'no logs':           { icon: 'bi-shield-check',     msg: 'No activity yet',       hint: 'Audit logs will appear here as actions are taken.' },
+        'no users':          { icon: 'bi-person-x',         msg: 'No users found',        hint: 'No users match your search.' },
+        'no services':       { icon: 'bi-list-ul',          msg: 'No services found',     hint: 'No services have been added yet.' },
+        'no doctors':        { icon: 'bi-person-badge',     msg: 'No doctors found',      hint: 'No doctors have been added yet.' },
+        'no results':        { icon: 'bi-search',           msg: 'No results found',      hint: 'Try a different search term or clear the filter.' }
     };
-
-    document.querySelectorAll('td[colspan]').forEach(function (td) {
-        var text = td.textContent.trim();
-        var isSearch = text.indexOf('No results for') === 0;
+    document.querySelectorAll('td[colspan]:not([data-empty-done])').forEach(function (td) {
+        td.setAttribute('data-empty-done', '1');
+        var raw = td.textContent.trim().toLowerCase();
         var cfg = null;
-
-        if (!isSearch) {
-            Object.keys(emptyConfig).forEach(function (key) {
-                if (text.indexOf(key.replace('.','')) !== -1 || text === key || text.replace('.','') === key.replace('.','')) {
-                    cfg = emptyConfig[key];
-                }
-            });
-        }
-
-        if (cfg || isSearch) {
-            var icon = cfg ? cfg.icon : 'bi-search';
-            var msg  = isSearch ? 'No results found' : (cfg ? cfg.msg : text);
-            var hint = isSearch ? 'Try a different search term or clear the filter.' : (cfg ? cfg.hint : '');
-
-            td.style.cssText = 'text-align:center;padding:48px 24px;';
-            td.innerHTML =
-                '<div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px;max-width:320px;">' +
-                  '<div style="width:52px;height:52px;border-radius:14px;background:var(--gray-100);display:flex;align-items:center;justify-content:center;">' +
-                    '<i class="bi ' + icon + '" style="font-size:1.5rem;color:var(--gray-400);"></i>' +
-                  '</div>' +
-                  '<div>' +
-                    '<div style="font-family:\'Sora\',sans-serif;font-weight:600;font-size:0.9rem;color:var(--gray-700);margin-bottom:4px;">' + msg + '</div>' +
-                    '<div style="font-size:0.8rem;color:var(--gray-400);line-height:1.5;">' + hint + '</div>' +
-                  '</div>' +
-                '</div>';
-        }
+        Object.keys(emptyMap).forEach(function (k) { if (raw.indexOf(k) !== -1) cfg = emptyMap[k]; });
+        if (!cfg) return;
+        td.style.cssText = 'text-align:center;padding:48px 24px;';
+        td.innerHTML =
+            '<div style="display:inline-flex;flex-direction:column;align-items:center;gap:10px;max-width:320px;">' +
+              '<div style="width:52px;height:52px;border-radius:14px;background:var(--gray-100);' +
+                   'display:flex;align-items:center;justify-content:center;">' +
+                '<i class="bi ' + cfg.icon + '" style="font-size:1.5rem;color:var(--gray-400);"></i>' +
+              '</div>' +
+              '<div>' +
+                '<div style="font-weight:600;font-size:0.9rem;color:var(--gray-700);margin-bottom:4px;">' + cfg.msg + '</div>' +
+                '<div style="font-size:0.8rem;color:var(--gray-400);line-height:1.5;">' + cfg.hint + '</div>' +
+              '</div>' +
+            '</div>';
     });
 
-    // ─── 9. ACTIVE BREADCRUMB ────────────────────────────────────────────────
+    // 8. BREADCRUMB
     var titleBlock = document.querySelector('.topbar-title-block');
     if (titleBlock && !titleBlock.querySelector('#breadcrumb')) {
         var path = window.location.pathname;
         var crumbs = ['Home'];
-
         if (path.indexOf('/modules/') !== -1) {
-            var parts = path.split('/');
+            var parts  = path.split('/');
             var modIdx = parts.indexOf('modules');
             if (modIdx !== -1 && parts[modIdx + 1]) {
-                var section = parts[modIdx + 1];
-                section = section.charAt(0).toUpperCase() + section.slice(1);
-                crumbs.push(section);
+                var sec = parts[modIdx + 1];
+                crumbs.push(sec.charAt(0).toUpperCase() + sec.slice(1));
             }
         }
-
-        var pageTitle = document.querySelector('.page-title');
-        var titleText = pageTitle ? pageTitle.textContent.trim() : '';
-        if (crumbs.length === 1 || crumbs[crumbs.length - 1].toLowerCase() !== titleText.toLowerCase()) {
-            crumbs.push(titleText);
-        }
-
+        var ptEl = document.querySelector('.page-title');
+        var pt   = ptEl ? ptEl.textContent.trim() : '';
+        if (pt && crumbs[crumbs.length - 1].toLowerCase() !== pt.toLowerCase()) crumbs.push(pt);
         if (crumbs.length > 1) {
             var bc = document.createElement('div');
             bc.id = 'breadcrumb';
             bc.innerHTML = crumbs.map(function (c, i) {
-                if (i === crumbs.length - 1) return '<span class="bc-current">' + c + '</span>';
-                return '<span class="bc-item">' + c + '</span>';
+                return i === crumbs.length - 1
+                    ? '<span class="bc-current">' + c + '</span>'
+                    : '<span class="bc-item">' + c + '</span>';
             }).join('<span class="bc-sep"><i class="bi bi-chevron-right"></i></span>');
             titleBlock.appendChild(bc);
         }
     }
 }
 
-// ─── PJAX NAVIGATION ────────────────────────────────────────────────────────
-// Intercepts sidebar nav link clicks, fetches the new page, swaps only
-// .main-content — sidebar/CSS/JS never reload, so navigation is instant.
-
+// ─── PJAX NAVIGATION ──────────────────────────────────────────────────────
 (function () {
     var sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
 
-    // Loading bar element
+    var _ctrl = null; // AbortController
+
     var bar = document.createElement('div');
-    bar.id = 'pjax-bar';
-    bar.style.cssText = [
-        'position:fixed', 'top:0', 'left:0', 'height:3px', 'width:0',
-        'background:linear-gradient(90deg,#4f8ef7,#38c6b0)',
-        'z-index:99999', 'transition:width 0.25s ease,opacity 0.3s ease',
-        'pointer-events:none', 'opacity:0'
-    ].join(';');
+    bar.id  = 'pjax-bar';
+    bar.style.cssText =
+        'position:fixed;top:0;left:0;height:3px;width:0;' +
+        'background:linear-gradient(90deg,#4f8ef7,#38c6b0);' +
+        'z-index:99999;transition:width 0.2s ease,opacity 0.3s ease;pointer-events:none;opacity:0;';
     document.body.appendChild(bar);
 
-    function barStart() {
-        bar.style.opacity = '1';
-        bar.style.width = '60%';
-    }
-    function barDone() {
+    function barStart() { bar.style.opacity = '1'; bar.style.width = '65%'; }
+    function barDone()  {
         bar.style.width = '100%';
         setTimeout(function () {
             bar.style.opacity = '0';
             setTimeout(function () { bar.style.width = '0'; }, 300);
-        }, 200);
+        }, 180);
     }
 
-    // Update sidebar active link highlight
-    function updateActiveLink(url) {
+    function updateActive(url) {
+        var uPath = url.split('?')[0];
         sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
-            var href = a.getAttribute('href');
-            if (!href) return;
-            // Match by path ending — e.g. "list.php" in href vs current url
-            var aPath = a.href.split('?')[0];
-            var uPath = url.split('?')[0];
-            a.classList.toggle('active', aPath === uPath);
+            a.classList.toggle('active', a.href.split('?')[0] === uPath);
         });
     }
 
-    // The core swap function
-    function pjaxLoad(url, pushState) {
+    function pjaxLoad(url, push) {
+        if (_ctrl) { try { _ctrl.abort(); } catch (e) {} }
+        _ctrl = new AbortController();
         barStart();
 
-        fetch(url, {
-            headers: { 'X-Requested-With': 'pjax' },
-            credentials: 'same-origin'
-        })
+        fetch(url, { signal: _ctrl.signal, credentials: 'same-origin', headers: { 'X-Requested-With': 'pjax' } })
         .then(function (res) {
-            // If server redirects to login, follow it fully
             if (res.redirected && res.url.indexOf('index.php') !== -1) {
-                window.location.href = res.url;
-                return null;
+                window.location.href = res.url; return null;
             }
             return res.text();
         })
         .then(function (html) {
             if (!html) return;
-
-            // Parse the fetched HTML
-            var parser = new DOMParser();
-            var doc    = parser.parseFromString(html, 'text/html');
-
+            var doc     = new DOMParser().parseFromString(html, 'text/html');
             var newMain = doc.querySelector('.main-content');
             var curMain = document.querySelector('.main-content');
+            if (!newMain || !curMain) { window.location.href = url; return; }
 
-            if (!newMain || !curMain) {
-                // Fallback: full reload if structure is unexpected
-                window.location.href = url;
-                return;
-            }
+            // Destroy charts before removing their canvases
+            destroyChartsIn(curMain);
 
-            // Swap content
             curMain.innerHTML = newMain.innerHTML;
-
-            // Update title
             if (doc.title) document.title = doc.title;
+            if (push !== false) history.pushState({ pjax: true, url: url }, doc.title || '', url);
 
-            // Push URL to browser history
-            if (pushState !== false) {
-                history.pushState({ pjax: true, url: url }, doc.title || '', url);
-            }
-
-            // Scroll new content to top
             curMain.scrollTo({ top: 0 });
+            window.scrollTo({ top: 0 });
 
-            // Remove stale breadcrumb so initPage() can rebuild it
             var oldBc = document.getElementById('breadcrumb');
             if (oldBc) oldBc.remove();
 
-            // Re-run all page init for the new content
+            // THIS is the key fix — re-run inline <script> tags so Chart.js works
+            runScripts(curMain);
             initPage();
-
-            // Update sidebar highlight
-            updateActiveLink(url);
-
+            updateActive(url);
             barDone();
         })
-        .catch(function () {
-            // Network error — fall back to normal navigation
+        .catch(function (err) {
+            if (err.name === 'AbortError') return;
+            bar.style.opacity = '0'; bar.style.width = '0';
             window.location.href = url;
         });
     }
 
-    // Intercept sidebar nav link clicks only
     sidebar.addEventListener('click', function (e) {
         var link = e.target.closest('a.nav-link');
         if (!link) return;
-
         var href = link.getAttribute('href');
         if (!href || href === '#' || href.startsWith('javascript')) return;
-
-        // Let logout and external links navigate normally
         if (href.indexOf('index.php') !== -1 || link.target === '_blank') return;
-
-        // Let modified clicks (ctrl/cmd/shift) open normally
         if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-
         e.preventDefault();
-
-        // Build absolute URL
         var url = link.href;
-
-        // Don't re-fetch current page
         if (url.split('?')[0] === window.location.href.split('?')[0]) return;
-
         pjaxLoad(url, true);
     });
 
-    // Handle browser back / forward
     window.addEventListener('popstate', function (e) {
-        if (e.state && e.state.pjax) {
-            pjaxLoad(e.state.url, false);
-        } else {
-            window.location.reload();
-        }
+        if (e.state && e.state.pjax) pjaxLoad(e.state.url, false);
+        else window.location.reload();
     });
 
-    // Record initial state so back button works from first page
     history.replaceState({ pjax: true, url: window.location.href }, document.title, window.location.href);
-
 })();
 
-// ─── ONE-TIME SETUP (sidebar, keyboard — runs once on first load only) ───────
+// ─── ONE-TIME SETUP ───────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', function () {
 
-    // ─── 3. MOBILE SIDEBAR BACKDROP ─────────────────────────────────────────
     var sidebar = document.getElementById('sidebar');
-
     if (sidebar) {
         var backdrop = document.createElement('div');
         backdrop.id = 'sidebar-backdrop';
         backdrop.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:999;cursor:pointer;';
         document.body.appendChild(backdrop);
-
-        var sidebarObserver = new MutationObserver(function () {
-            backdrop.style.display = (window.innerWidth <= 768 && sidebar.classList.contains('mobile-open'))
-                ? 'block' : 'none';
-        });
-        sidebarObserver.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
-
+        new MutationObserver(function () {
+            backdrop.style.display =
+                (window.innerWidth <= 768 && sidebar.classList.contains('mobile-open')) ? 'block' : 'none';
+        }).observe(sidebar, { attributes: true, attributeFilter: ['class'] });
         backdrop.addEventListener('click', function () {
             sidebar.classList.remove('mobile-open');
             backdrop.style.display = 'none';
         });
     }
 
-    // ─── 7. KEYBOARD SHORTCUTS ──────────────────────────────────────────────
     document.addEventListener('keydown', function (e) {
         var tag = document.activeElement ? document.activeElement.tagName : '';
-        var inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
-                       || document.activeElement.isContentEditable);
+        var inInput = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
+                      || !!(document.activeElement && document.activeElement.isContentEditable);
 
         if (e.key === '/' && !inInput && !e.ctrlKey && !e.metaKey) {
-            var searchInput = document.querySelector(
-                'input[name="search"], input[type="search"], input[placeholder*="earch"]'
-            );
-            if (searchInput) {
-                e.preventDefault();
-                searchInput.focus();
-                searchInput.select();
-            }
+            var s = document.querySelector('input[name="search"],input[type="search"],input[placeholder*="earch"]');
+            if (s) { e.preventDefault(); s.focus(); s.select(); }
         }
-
         if ((e.key === 'n' || e.key === 'N') && !inInput && !e.ctrlKey && !e.metaKey) {
-            var addBtn = document.querySelector(
-                'a.btn-primary[href*="add"], a.btn-primary[href*="create"], a.btn-primary[href*="book"]'
-            );
-            if (addBtn) {
-                e.preventDefault();
-                addBtn.click();
+            var btn = document.querySelector('a.btn-primary[href*="add"],a.btn-primary[href*="create"],a.btn-primary[href*="book"]');
+            if (btn) { e.preventDefault(); btn.click(); }
+        }
+        if (e.key === 'Escape') {
+            var modal = document.querySelector('.modal.show');
+            if (modal && window.bootstrap && bootstrap.Modal.getInstance(modal)) {
+                bootstrap.Modal.getInstance(modal).hide();
             }
         }
     });
 
-    // Run page init on first load
     initPage();
 });
