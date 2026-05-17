@@ -239,6 +239,30 @@ function initPage() {
             // Swap content
             curMain.innerHTML = newMain.innerHTML;
 
+            // ── FIX: inject page-specific <style> tags from fetched page ──
+            document.querySelectorAll('style[data-pjax]').forEach(function(s) { 
+                s.remove(); 
+            });
+            doc.querySelectorAll('head style').forEach(function(style) {
+                var el = document.createElement('style');
+                el.setAttribute('data-pjax', '1');
+                el.textContent = style.textContent;
+                document.head.appendChild(el);
+            });
+
+            // ── FIX: inject page-specific <link> stylesheets not already loaded ──
+            doc.querySelectorAll('head link[rel="stylesheet"]').forEach(function(link) {
+                var href = link.getAttribute('href');
+                if (!href) return;
+                if (!document.querySelector('link[href="' + href + '"]')) {
+                    var el = document.createElement('link');
+                    el.rel = 'stylesheet';
+                    el.href = href;
+                    el.setAttribute('data-pjax', '1');
+                    document.head.appendChild(el);
+                }
+            });
+
             // Update title
             if (doc.title) document.title = doc.title;
 
