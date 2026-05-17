@@ -162,11 +162,14 @@ function initPage() {
 }
 
 // ─── PJAX NAVIGATION ────────────────────────────────────────────────────────
+// Intercepts sidebar nav link clicks, fetches the new page, swaps only
+// .main-content — sidebar/CSS/JS never reload, so navigation is instant.
+
 (function () {
     var sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
 
-    // Loading bar
+    // Loading bar element
     var bar = document.createElement('div');
     bar.id = 'pjax-bar';
     bar.style.cssText = [
@@ -177,7 +180,10 @@ function initPage() {
     ].join(';');
     document.body.appendChild(bar);
 
-    function barStart() { bar.style.opacity = '1'; bar.style.width = '60%'; }
+    function barStart() {
+        bar.style.opacity = '1';
+        bar.style.width = '60%';
+    }
     function barDone() {
         bar.style.width = '100%';
         setTimeout(function () {
@@ -186,16 +192,19 @@ function initPage() {
         }, 200);
     }
 
-    // Update sidebar active link
+    // Update sidebar active link highlight
     function updateActiveLink(url) {
-        sidebar.querySelectorAll('a[href]').forEach(function (a) {
+        sidebar.querySelectorAll('a.nav-link').forEach(function (a) {
+            var href = a.getAttribute('href');
+            if (!href) return;
+            // Match by path ending — e.g. "list.php" in href vs current url
             var aPath = a.href.split('?')[0];
             var uPath = url.split('?')[0];
             a.classList.toggle('active', aPath === uPath);
         });
     }
 
-    // Core PJAX load
+    // The core swap function
     function pjaxLoad(url, pushState) {
         barStart();
 
@@ -204,6 +213,7 @@ function initPage() {
             credentials: 'same-origin'
         })
         .then(function (res) {
+            // If server redirects to login, follow it fully
             if (res.redirected && res.url.indexOf('index.php') !== -1) {
                 window.location.href = res.url;
                 return null;
@@ -213,105 +223,77 @@ function initPage() {
         .then(function (html) {
             if (!html) return;
 
-            var parser  = new DOMParser();
-            var doc     = parser.parseFromString(html, 'text/html');
+            // Parse the fetched HTML
+            var parser = new DOMParser();
+            var doc    = parser.parseFromString(html, 'text/html');
+
             var newMain = doc.querySelector('.main-content');
             var curMain = document.querySelector('.main-content');
 
             if (!newMain || !curMain) {
+                // Fallback: full reload if structure is unexpected
                 window.location.href = url;
                 return;
             }
 
-            // ── Destroy Chart.js instances before swap ──────────────────────
-            if (window.Chart) {
-                curMain.querySelectorAll('canvas').forEach(function (canvas) {
-                    var chart = Chart.getChart
-                        ? Chart.getChart(canvas)
-                        : (Chart.instances && Chart.instances[canvas.id]);
-                    if (chart) try { chart.destroy(); } catch (e) {}
-                });
-            }
-
-            // ── Swap main content ───────────────────────────────────────────
+            // Swap content
             curMain.innerHTML = newMain.innerHTML;
 
-            // ── Inject page-specific styles from fetched page ───────────────
-            document.querySelectorAll('style[data-pjax], link[data-pjax]').forEach(function (s) {
-                s.remove();
-            });
-            doc.querySelectorAll('head style').forEach(function (style) {
-                var el = document.createElement('style');
-                el.setAttribute('data-pjax', '1');
-                el.textContent = style.textContent;
-                document.head.appendChild(el);
-            });
-            doc.querySelectorAll('head link[rel="stylesheet"]').forEach(function (link) {
-                var href = link.getAttribute('href');
-                if (!href) return;
-                if (document.querySelector('link[href="' + href + '"]')) return;
-                var el = document.createElement('link');
-                el.rel = 'stylesheet';
-                el.href = href;
-                el.setAttribute('data-pjax', '1');
-                document.head.appendChild(el);
-            });
-
-            // ── Update title + URL ──────────────────────────────────────────
+            // Update title
             if (doc.title) document.title = doc.title;
+
+            // Push URL to browser history
             if (pushState !== false) {
                 history.pushState({ pjax: true, url: url }, doc.title || '', url);
             }
 
-            // ── Scroll to top ───────────────────────────────────────────────
+            // Scroll new content to top
             curMain.scrollTo({ top: 0 });
 
-            // ── Remove stale breadcrumb ─────────────────────────────────────
+            // Remove stale breadcrumb so initPage() can rebuild it
             var oldBc = document.getElementById('breadcrumb');
             if (oldBc) oldBc.remove();
 
-            // ── Re-execute inline + external scripts ────────────────────────
-            curMain.querySelectorAll('script').forEach(function (oldScript) {
-                var newScript = document.createElement('script');
-                Array.from(oldScript.attributes).forEach(function (attr) {
-                    newScript.setAttribute(attr.name, attr.value);
-                });
-                newScript.textContent = oldScript.textContent;
-                oldScript.replaceWith(newScript);
-            });
-
-            // ── Re-run page init ────────────────────────────────────────────
+            // Re-run all page init for the new content
             initPage();
 
-            // ── Update sidebar highlight ────────────────────────────────────
+            // Update sidebar highlight
             updateActiveLink(url);
 
             barDone();
         })
         .catch(function () {
+            // Network error — fall back to normal navigation
             window.location.href = url;
         });
     }
 
-    // Intercept sidebar clicks
+    // Intercept sidebar nav link clicks only
     sidebar.addEventListener('click', function (e) {
-        var link = e.target.closest('a[href]');
+        var link = e.target.closest('a.nav-link');
         if (!link) return;
 
         var href = link.getAttribute('href');
         if (!href || href === '#' || href.startsWith('javascript')) return;
+
+        // Let logout and external links navigate normally
         if (href.indexOf('index.php') !== -1 || link.target === '_blank') return;
+
+        // Let modified clicks (ctrl/cmd/shift) open normally
         if (e.ctrlKey || e.metaKey || e.shiftKey) return;
 
         e.preventDefault();
 
+        // Build absolute URL
         var url = link.href;
+
+        // Don't re-fetch current page
         if (url.split('?')[0] === window.location.href.split('?')[0]) return;
 
         pjaxLoad(url, true);
     });
 
-    // Browser back / forward
+    // Handle browser back / forward
     window.addEventListener('popstate', function (e) {
         if (e.state && e.state.pjax) {
             pjaxLoad(e.state.url, false);
@@ -320,17 +302,17 @@ function initPage() {
         }
     });
 
-    history.replaceState(
-        { pjax: true, url: window.location.href },
-        document.title,
-        window.location.href
-    );
+    // Record initial state so back button works from first page
+    history.replaceState({ pjax: true, url: window.location.href }, document.title, window.location.href);
+
 })();
 
-// ─── ONE-TIME SETUP ──────────────────────────────────────────────────────────
+// ─── ONE-TIME SETUP (sidebar, keyboard — runs once on first load only) ───────
 document.addEventListener('DOMContentLoaded', function () {
 
+    // ─── 3. MOBILE SIDEBAR BACKDROP ─────────────────────────────────────────
     var sidebar = document.getElementById('sidebar');
+
     if (sidebar) {
         var backdrop = document.createElement('div');
         backdrop.id = 'sidebar-backdrop';
@@ -349,6 +331,7 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
+    // ─── 7. KEYBOARD SHORTCUTS ──────────────────────────────────────────────
     document.addEventListener('keydown', function (e) {
         var tag = document.activeElement ? document.activeElement.tagName : '';
         var inInput = (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT'
@@ -376,5 +359,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
+    // Run page init on first load
     initPage();
 });
